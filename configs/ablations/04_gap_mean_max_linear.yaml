@@ -1,0 +1,26 @@
+model:
+  dino_repo: data/models/dinov2
+  dino_weights: data/models/checkpoints/dinov2_vits14_reg4_pretrain.pth
+  num_blocks: 12
+  embed_dim: 384
+  freeze_dino: true
+head:
+  type: gap_linear
+  pooling: [mean, max]
+data:
+  root: data/classification
+  train_dir: train
+  val_dir: val
+  image_size: 518
+  augment: true
+training:
+  batch_size: 8
+  epochs: 30
+  lr: 0.001
+  weight_decay: 0.01
+  num_workers: 4
+  seed: 0
+  device: cuda
+output:
+  dir: outputs/dino_image_classifier
+  experiment_name: ablation_04_gap_mean_max_linear

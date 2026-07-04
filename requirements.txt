@@ -1,0 +1,12 @@
+# Install PyTorch with CUDA separately, e.g.:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+matplotlib>=3.11
+numpy>=2.4
+pillow>=12.0
+pyyaml>=6.0
+scikit-image>=0.26
+scikit-learn>=1.9
+scipy>=1.18
+tensorboard>=2.14
+torch>=2.6
+torchvision>=0.21
