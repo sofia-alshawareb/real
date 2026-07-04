@@ -3,7 +3,7 @@
 // в проде эту роль берёт на себя серверный тайлинг.
 
 import { genId } from '../../stores/experimentsStore';
-import { putTile } from '../../db/imageRepo';
+import { putTile, saveSourceImage } from '../../db/imageRepo';
 
 export const TILE_SIZE = 512;
 const MAX_LONG_SIDE = 16384;
@@ -105,5 +105,15 @@ export async function importImageFile(file: File, onProgress?: (share: number) =
   }
   onProgress?.(1);
   bitmap.close();
+
+  if (downscaled && sourceBitmap instanceof HTMLCanvasElement) {
+    const blob = await new Promise<Blob>((resolve, reject) =>
+      sourceBitmap.toBlob((b) => (b ? resolve(b) : reject(new Error('Не удалось сохранить исходник'))), 'image/png'),
+    );
+    await saveSourceImage(imageId, blob, width, height);
+  } else {
+    await saveSourceImage(imageId, file, width, height);
+  }
+
   return { imageId, width, height, maxLevel, downscaled };
 }

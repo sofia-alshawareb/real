@@ -307,7 +307,53 @@ def parse_args() -> argparse.Namespace:
             "heat map vs that patch."
         ),
     )
+    parser.add_argument(
+        "--profile-steps",
+        action="store_true",
+        help="Print per-step wall times and identify the bottleneck.",
+    )
     return parser.parse_args()
+
+
+class StepTimer:
+    def __init__(self, enabled: bool) -> None:
+        self.enabled = enabled
+        self.steps: list[tuple[str, float]] = []
+        self._last = time.perf_counter()
+
+    def begin(self, name: str) -> None:
+        if self.enabled:
+            print(f"[pipeline] START {name}", flush=True)
+
+    def mark(self, name: str) -> None:
+        if not self.enabled:
+            return
+        now = time.perf_counter()
+        dt = now - self._last
+        self.steps.append((name, dt))
+        self._last = now
+        print(f"[pipeline] DONE  {name} ({dt:.3f}s)", flush=True)
+
+    def report(self) -> None:
+        if not self.enabled or not self.steps:
+            return
+        total = sum(dt for _, dt in self.steps)
+        print("\n--- Step timings ---", flush=True)
+        for name, dt in self.steps:
+            pct = 100.0 * dt / total if total > 0 else 0.0
+            print(f"  {dt:7.3f}s ({pct:5.1f}%)  {name}", flush=True)
+        print(f"  {'─' * 44}", flush=True)
+        print(f"  {total:7.3f}s        total", flush=True)
+        bottleneck_name, bottleneck_dt = max(self.steps, key=lambda item: item[1])
+        print(f"Bottleneck: {bottleneck_name} ({bottleneck_dt:.3f}s)", flush=True)
+
+
+_PIPELINE_STEP_LOG = False
+
+
+def _plog(msg: str) -> None:
+    if _PIPELINE_STEP_LOG:
+        print(f"[pipeline] {msg}", flush=True)
 
 
 def resolve_dino_weights(path: str) -> str:
@@ -969,15 +1015,19 @@ def morphological_close_label_map(
 
     steal_dist = np.full((len(ids),) + labels.shape, np.inf, dtype=np.float64)
     for i, cls_id in enumerate(ids):
+        _plog(f"morph_close: class {cls_id} ({i + 1}/{len(ids)})")
         mask = labels == cls_id
         if not np.any(mask):
             continue
+        _plog(f"morph_close: class {cls_id} closing")
         closed = closing(mask.astype(np.uint8), footprint=footprint).astype(bool)
+        _plog(f"morph_close: class {cls_id} distance_transform_edt")
         dist_to_c = ndi.distance_transform_edt(~mask)
         steal = closed & (labels != cls_id) & (dist_to_c <= radius)
         steal_dist[i] = np.where(steal, dist_to_c, np.inf)
 
     out = labels.copy()
+    _plog("morph_close: merge stolen pixels")
     any_steal = np.isfinite(steal_dist).any(axis=0)
     if np.any(any_steal):
         best = np.argmin(steal_dist, axis=0)
@@ -1031,9 +1081,11 @@ def promote_regions_by_overlap(
     seed_weights = seed_bool.astype(np.float64).ravel()
 
     for region_id in range(n_regions):
+        _plog(f"promote_regions: band {region_id}")
         band = region_labels == region_id
         if not np.any(band):
             continue
+        _plog(f"promote_regions: band {region_id} connected_components")
         labeled, n_comp = ndi.label(band)
         if n_comp == 0:
             continue
@@ -1278,8 +1330,11 @@ def run_peak_patch_similarity_only(
         return out_path
 
     t0 = time.perf_counter()
+    timer = StepTimer(bool(args.profile_steps))
+
     print(f"Loading image: {input_path}")
     rgb = load_rgb(input_path)
+    timer.mark("load_rgb")
     print(f"Running DINO block {block_index} ({rgb.shape[1]}×{rgb.shape[0]}) on {device}…")
     patch_feats, target_hw = dino_block_patch_features(
         rgb,
@@ -1290,9 +1345,12 @@ def run_peak_patch_similarity_only(
         repo_dir=Path(args.dino_repo),
         weights=dino_weights,
     )
+    timer.mark("dino_block_patch_features")
     print("Computing peak-patch similarity map…")
     meta = save_peak_patch_similarity_map(out_path, patch_feats, target_hw)
+    timer.mark("peak_patch_similarity_map + save")
     elapsed = time.perf_counter() - t0
+    timer.report()
     print(f"Peak patch: row={meta['peak_patch_row_col'][0]}, col={meta['peak_patch_row_col'][1]}")
     print(f"Saved: {out_path}")
     print(f"Wall time: {elapsed:.3f} s")
@@ -1322,7 +1380,12 @@ def run_one(
         return result_path
 
     t0 = time.perf_counter()
+    profile = bool(args.profile_steps)
+    global _PIPELINE_STEP_LOG
+    _PIPELINE_STEP_LOG = profile
+    timer = StepTimer(profile)
 
+    timer.begin("load_image + intensity")
     rgb_input = load_rgb(input_path)
     gray = load_gray01(input_path)
     intensity = build_intensity(
@@ -1331,12 +1394,16 @@ def run_one(
         illum_sigma=args.illum_sigma,
         denoise=args.denoise,
     )
+    timer.mark("load_image + intensity")
 
     patch_feats: torch.Tensor | None = None
     if region_map == REGION_MAP_INTENSITY_GRADIENT:
+        timer.begin("intensity_gradient_map")
         region_map_values = intensity_gradient_map(intensity)
         region_map_name = "intensity gradient"
+        timer.mark("intensity_gradient_map")
     else:
+        timer.begin("dino_block_patch_features")
         patch_feats, target_hw = dino_block_patch_features(
             rgb_input,
             device=device,
@@ -1346,10 +1413,14 @@ def run_one(
             repo_dir=Path(args.dino_repo),
             weights=dino_weights,
         )
+        timer.mark("dino_block_patch_features")
+        timer.begin("features_to_activation")
         region_map_values = features_to_activation(patch_feats, target_hw)
         region_map_name = f"DINO {block_tag}"
+        timer.mark("features_to_activation")
 
     if patch_feats is None and log and args.log_probes:
+        timer.begin("dino_block_patch_features (probes only)")
         patch_feats, _ = dino_block_patch_features(
             rgb_input,
             device=device,
@@ -1359,40 +1430,54 @@ def run_one(
             repo_dir=Path(args.dino_repo),
             weights=dino_weights,
         )
+        timer.mark("dino_block_patch_features (probes only)")
 
-    # Parallel: 4-GMM on region map + 2-GMM FG on intensity (no fork — CUDA-safe).
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        fut_gmm4 = pool.submit(
-            _fit_region_gmm,
-            region_map_values,
-            args.max_samples,
-            args.random_state,
-        )
-        fut_fg = pool.submit(
-            _fit_fg_gmm,
-            intensity,
-            args.max_samples,
-            args.random_state,
-        )
-        means, variances, weights = fut_gmm4.result()
-        fg_t, fg_means, fg_vars, fg_weights = fut_fg.result()
+    timer.begin("gmm4_region")
+    means, variances, weights = _fit_region_gmm(
+        region_map_values,
+        args.max_samples,
+        args.random_state,
+    )
+    timer.mark("gmm4_region")
 
+    timer.begin("gmm2_fg")
+    fg_t, fg_means, fg_vars, fg_weights = _fit_fg_gmm(
+        intensity,
+        args.max_samples,
+        args.random_state,
+    )
+    timer.mark("gmm2_fg")
+
+    timer.begin("region_thresholds")
     thresholds = thresholds_from_adjacent_intersections(means, variances, weights)
     region_labels_raw = segment_by_thresholds(region_map_values, thresholds)
+    timer.mark("region_thresholds")
+
+    timer.begin("morph_close_regions")
     region_labels = morphological_close_label_map(
         region_labels_raw,
         radius=args.close_radius,
         class_ids=list(REGION_NAMES.keys()),
     )
+    timer.mark("morph_close_regions")
 
+    timer.begin("fg_seed")
     fg_seed = (intensity >= fg_t).astype(np.uint8)
+    timer.mark("fg_seed")
+
+    timer.begin("fg_promote_regions")
     fg_mask = promote_regions_by_overlap(
         region_labels,
         fg_seed,
         args.region_overlap,
     )
-    fg_object, partitions = split_foreground_object_and_partitions(fg_mask)
+    timer.mark("fg_promote_regions")
 
+    timer.begin("split_fg")
+    fg_object, partitions = split_foreground_object_and_partitions(fg_mask)
+    timer.mark("split_fg")
+
+    timer.begin("gmm2_defect")
     non_fg = fg_mask == 0
     defect_t, def_means, def_vars, def_weights = two_gmm_threshold(
         intensity,
@@ -1400,7 +1485,13 @@ def run_one(
         random_state=args.random_state,
         pixel_mask=non_fg,
     )
+    timer.mark("gmm2_defect")
+
+    timer.begin("defect_seed")
     defect_seed = (intensity < defect_t).astype(np.uint8)
+    timer.mark("defect_seed")
+
+    timer.begin("defect_promote_regions")
     if region_map == REGION_MAP_INTENSITY_GRADIENT:
         defect_mask = select_regions_by_overlap(
             region_labels,
@@ -1415,14 +1506,21 @@ def run_one(
             args.region_overlap,
         )
         defect_match_mode = "seed_plus_region_promote"
+    timer.mark("defect_promote_regions")
 
+    timer.begin("build_final_seg")
     seg_raw = build_final_segmentation(fg_object, partitions, defect_mask)
+    timer.mark("build_final_seg")
+
+    timer.begin("morph_close_final")
     seg = morphological_close_label_map(
         seg_raw,
         radius=args.close_radius,
         class_ids=list(CLASS_NAMES.keys()),
     )
+    timer.mark("morph_close_final")
 
+    timer.begin("render_rgb_masks")
     with ThreadPoolExecutor(max_workers=workers) as pool:
         fut_seg_rgb = pool.submit(segmentation_to_rgb, seg)
         fut_region_rgb = pool.submit(labels_to_rgb, region_labels, REGION_COLORS)
@@ -1430,7 +1528,9 @@ def run_one(
         seg_rgb = fut_seg_rgb.result()
         region_rgb = fut_region_rgb.result()
         act_rgb = fut_act_rgb.result()
+    timer.mark("render_rgb_masks")
 
+    timer.begin("build_result_stacks + legend")
     stack = add_legend_bar(
         stack_horizontal([rgb_input, seg_rgb]),
         CLASS_NAMES,
@@ -1443,10 +1543,12 @@ def run_one(
         REGION_COLORS,
         order=[0, 1, 2, 3],
     )
+    timer.mark("build_result_stacks + legend")
 
     # Pipeline order prefixes: 04 regions (after close), 10 final result.
     regions_path = out_dir / f"{output_stem}_04_regions.png"
     regions_npy_path = out_dir / f"{output_stem}_04_regions.npy"
+    timer.begin("save_main_outputs (result + regions png/npy)")
     with ThreadPoolExecutor(max_workers=min(workers, 3)) as pool:
         futs = [
             pool.submit(Image.fromarray(stack).save, result_path),
@@ -1455,8 +1557,10 @@ def run_one(
         ]
         for fut in futs:
             fut.result()
+    timer.mark("save_main_outputs (result + regions png/npy)")
 
     if log:
+        timer.begin("log_intermediates (setup)")
         log_dir = out_dir / f"{output_stem}_intermediates"
         log_dir.mkdir(parents=True, exist_ok=True)
         int_rgb = gray01_to_rgb(intensity)
@@ -1487,7 +1591,9 @@ def run_one(
         path_08_def_promoted = log_dir / "08_defect_promoted_mask.png"
         path_09_final_pre = log_dir / "09_final_pre_close.png"
         path_00_summary = log_dir / "00_summary.json"
+        timer.mark("log_intermediates (setup)")
 
+        timer.begin("log_gmm_histograms")
         save_histogram_with_gmm(
             path_03_act_hist,
             region_map_values,
@@ -1522,6 +1628,7 @@ def run_one(
             sample_mask=non_fg,
             value_label="Intensity",
         )
+        timer.mark("log_gmm_histograms")
         meta = {
             "input": str(input_path),
             "preprocess": args.preprocess,
@@ -1583,6 +1690,7 @@ def run_one(
         }
         if args.log_probes:
             assert patch_feats is not None
+            timer.begin("log_probes (compute + save)")
             probe_info = compute_and_save_probes(
                 log_dir,
                 intensity=intensity,
@@ -1596,7 +1704,9 @@ def run_one(
             )
             meta["probes"] = probe_info
             meta["artifact_order"].append("probes/ (exploratory maps)")
+            timer.mark("log_probes (compute + save)")
         path_00_summary.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        timer.begin("log_intermediate_png/npy saves")
         with ThreadPoolExecutor(max_workers=min(workers, 8)) as pool:
             log_futs = [
                 pool.submit(Image.fromarray(int_rgb).save, path_01_intensity),
@@ -1632,6 +1742,7 @@ def run_one(
             ]
             for fut in log_futs:
                 fut.result()
+        timer.mark("log_intermediate_png/npy saves")
         print(f"Saved intermediates: {log_dir}")
         print(f"  03 histogram: {path_03_act_hist}")
         print(f"  05 histogram: {path_05_fg_hist}")
@@ -1656,6 +1767,7 @@ def run_one(
     print(f"DINO regions: {region_counts}")
     print(f"Saved: {result_path}")
     print(f"Wall time: {elapsed:.3f} s")
+    timer.report()
     return result_path
 
 
@@ -1672,14 +1784,16 @@ def main() -> None:
 
     dino_model = None
     if needs_dino_inference(args):
-        print(f"Device: {device}")
-        print(f"Loading DINO ({args.num_blocks} blocks)…")
+        print(f"Device: {device}", flush=True)
+        print(f"Loading DINO ({args.num_blocks} blocks)…", flush=True)
+        t_load = time.perf_counter()
         dino_model = load_dinov2_truncated(
             Path(args.dino_repo),
             dino_weights,
             device,
             int(args.num_blocks),
         )
+        print(f"[pipeline] DONE  load_dinov2 ({time.perf_counter() - t_load:.3f}s)", flush=True)
 
     try:
         if args.peak_patch_similarity_only:

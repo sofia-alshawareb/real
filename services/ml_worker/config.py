@@ -24,15 +24,23 @@ class DinoConfig:
 
 @dataclass
 class SegmentationConfig:
-    region_map: str = "dino"
-    block_index: int = 1
-    region_overlap: float = 0.6
+    mode: str = "hybrid"
+    calibration_dir: Path = field(default_factory=lambda: _ROOT / "data/calib/compiled")
+    rgb_hist_bins: int = 32
+    min_backproj_score: float = 1e-6
+    min_cosine_sim: float = 0.3
     close_radius: int = 3
     random_state: int = 0
     max_samples: int = 300_000
+    max_rgb_samples: int = 500_000
+    max_embedding_samples: int = 50_000
     preprocess: bool = False
     denoise: bool = True
     illum_sigma: float = 64.0
+    region_overlap: float = 0.60
+    block_index: int = 1
+    fg_dilate_radius: int = 5
+    talc_black_max: float = 45.0
 
 
 @dataclass
@@ -79,15 +87,25 @@ def load_config(path: Path | str | None = None) -> ServiceConfig:
             device=str(dino_raw.get("device", "")),
         ),
         segmentation=SegmentationConfig(
-            region_map=str(seg_raw.get("region_map", "dino")),
-            block_index=int(seg_raw.get("block_index", 1)),
-            region_overlap=float(seg_raw.get("region_overlap", 0.6)),
+            mode=str(seg_raw.get("mode", "hybrid")),
+            calibration_dir=_resolve_path(
+                seg_raw.get("calibration_dir", "data/calib/compiled")
+            ),
+            rgb_hist_bins=int(seg_raw.get("rgb_hist_bins", 32)),
+            min_backproj_score=float(seg_raw.get("min_backproj_score", 1e-6)),
+            min_cosine_sim=float(seg_raw.get("min_cosine_sim", 0.3)),
             close_radius=int(seg_raw.get("close_radius", 3)),
             random_state=int(seg_raw.get("random_state", 0)),
             max_samples=int(seg_raw.get("max_samples", 300_000)),
+            max_rgb_samples=int(seg_raw.get("max_rgb_samples", 500_000)),
+            max_embedding_samples=int(seg_raw.get("max_embedding_samples", 50_000)),
             preprocess=bool(seg_raw.get("preprocess", False)),
             denoise=bool(seg_raw.get("denoise", True)),
             illum_sigma=float(seg_raw.get("illum_sigma", 64.0)),
+            region_overlap=float(seg_raw.get("region_overlap", 0.60)),
+            block_index=int(seg_raw.get("block_index", 1)),
+            fg_dilate_radius=int(seg_raw.get("fg_dilate_radius", 5)),
+            talc_black_max=float(seg_raw.get("talc_black_max", 45.0)),
         ),
         storage=StorageConfig(
             root=_resolve_path(storage_raw.get("root", "data/artifacts")),

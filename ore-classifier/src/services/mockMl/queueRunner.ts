@@ -1,15 +1,19 @@
-// Воркер очереди ML: обрабатывает кадры по одному, переживает офлайн-сбои и авто-повтор.
+// Воркер очереди ML: mock (демо) или реальный backend в зависимости от mlOffline.
 
 import { useMlQueueStore, type QueueItem } from '../../stores/mlQueueStore';
 import { useExperimentsStore, genId } from '../../stores/experimentsStore';
 import { useDepositsStore } from '../../stores/depositsStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { putMask } from '../../db/imageRepo';
 import { calcMetrics } from '../metricsCalc';
 import { classifyFrame } from '../rulesEngine';
-import { segmentFrame, MlUnavailableError } from './mockMlService';
+import { segmentFrameMock, MlUnavailableError } from './mockMlService';
+import { segmentFrameReal } from '../ml/realMlClient';
 import { notify } from '../../utils/toast';
 
 let running = false;
+
+export { MlUnavailableError } from '../ml/errors';
 
 export function enqueueFrame(experimentId: string, frameId: string): void {
   useMlQueueStore.getState().enqueue(frameId, experimentId);
@@ -25,7 +29,7 @@ export function retryFrame(experimentId: string, frameId: string): void {
 export function retryAllFailed(): void {
   const count = useMlQueueStore.getState().retryAllFailed();
   if (count > 0) {
-    notify(`Сервис ML снова доступен, обрабатываем ${count} кадр(ов)`, 'success');
+    notify(`Очередь ML: повторная обработка ${count} кадр(ов)`, 'success');
     void ensureQueueRunning();
   }
 }
@@ -43,8 +47,24 @@ async function processItem(item: QueueItem): Promise<void> {
   queueStore.markProcessing(item.frameId);
   expStore.updateFrame(item.experimentId, item.frameId, { status: 'processing' });
 
+  const useMock = useSettingsStore.getState().mlOffline || frame.source.kind === 'procedural';
+
   try {
-    const seg = await segmentFrame(frame);
+    let seg;
+    let backendImageId: string | undefined;
+
+    if (useMock) {
+      seg = await segmentFrameMock(frame);
+    } else {
+      const real = await segmentFrameReal(frame);
+      seg = real;
+      backendImageId = real.backendImageId;
+    }
+
+    if (backendImageId) {
+      expStore.updateFrame(item.experimentId, item.frameId, { backendImageId });
+    }
+
     const maskId = genId('mask');
     await putMask({ id: maskId, frameId: frame.id, width: seg.mw, height: seg.mh, data: seg.data });
 

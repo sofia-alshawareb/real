@@ -34,8 +34,10 @@ export async function getMaskByFrameId(frameId: string) {
 }
 
 export async function deleteFrameData(frameId: string, imageId?: string) {
-  await db.transaction('rw', db.masks, db.tiles, db.sourceImages, async () => {
+  await db.transaction('rw', db.masks, db.tiles, db.sourceImages, db.talcDrawnMasks, db.positivePromptMasks, async () => {
     await db.masks.where('frameId').equals(frameId).delete();
+    await db.talcDrawnMasks.where('frameId').equals(frameId).delete();
+    await db.positivePromptMasks.where('frameId').equals(frameId).delete();
     if (imageId) {
       const keys = await db.tiles.toCollection().primaryKeys();
       const toDelete = keys.filter((k) => typeof k === 'string' && k.startsWith(`${imageId}/`));

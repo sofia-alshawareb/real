@@ -95,6 +95,7 @@ export interface Frame {
   pixelSizeUm: number;
   status: FrameStatus;
   isReference: boolean;
+  backendImageId?: string;
   autoMaskId?: string;
   maskId?: string;
   metrics?: FrameMetrics;

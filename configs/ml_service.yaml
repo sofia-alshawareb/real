@@ -2,19 +2,27 @@ dino:
   repo: data/models/dinov2
   weights: data/models/checkpoints/dinov2_vits14_reg4_pretrain.pth
   num_blocks: 12
-  inference_blocks: [1, 11]
+  inference_blocks: [1]
   save_activations: false
   device: ""
 segmentation:
-  region_map: dino
-  block_index: 1
-  region_overlap: 0.6
+  mode: hybrid
+  calibration_dir: data/calib/compiled
+  rgb_hist_bins: 32
+  min_backproj_score: 0.000001
+  min_cosine_sim: 0.3
   close_radius: 3
   random_state: 0
   max_samples: 300000
+  max_rgb_samples: 500000
+  max_embedding_samples: 50000
   preprocess: false
   denoise: true
   illum_sigma: 64.0
+  region_overlap: 0.60
+  block_index: 1
+  fg_dilate_radius: 5
+  talc_black_max: 45.0
 storage:
   root: data/artifacts
   images_subdir: images

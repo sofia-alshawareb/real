@@ -12,15 +12,25 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew';
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
 import SaveIcon from '@mui/icons-material/Save';
+import DownloadIcon from '@mui/icons-material/Download';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useExperimentsStore } from '../../stores/experimentsStore';
 import { useDepositsStore } from '../../stores/depositsStore';
 import { useEditorStore, type MaskClassKey } from '../../stores/editorStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { MASK_CLASSES } from '../../theme/palette';
 import { maskWorkingSize } from '../../services/grainModel';
 import { getMask, putMask } from '../../db/imageRepo';
+import { saveUserTalcStroke } from '../../db/talcMaskArchive';
+import { saveUserPositivePromptStroke } from '../../db/positivePromptArchive';
 import { calcMetrics } from '../../services/metricsCalc';
 import { classifyFrame } from '../../services/rulesEngine';
+import { refineCalibrationFromHint, saveUserDrawnMaskToServer } from '../../services/ml/realMlClient';
+import { UI_CLASS_TO_CALIB_KEY, type CalibClassKey } from '../../services/ml/classMap';
+import { upscaleMaskNearest } from '../../services/ml/maskUtils';
+import { MlUnavailableError } from '../../services/ml/errors';
 import type { FrameMetrics } from '../../types/models';
 import { ViewerCanvas } from './ViewerCanvas';
 import { MaskOverlay, type MaskBuffer } from './maskOverlay';
@@ -31,6 +41,7 @@ import { LayerLegend } from './LayerLegend';
 import { FrameClassPanel } from './FrameClassPanel';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { genId } from '../../stores/experimentsStore';
+import { downloadUserDrawnMask, userDrawnMaskHasInk } from '../../services/maskExport';
 import { notify } from '../../utils/toast';
 
 export function FrameEditorPage() {
@@ -65,6 +76,10 @@ export function FrameEditorPage() {
   const viewerRef = useRef<OpenSeadragon.Viewer | null>(null);
   const overlayRef = useRef<MaskOverlay | null>(null);
   const maskBufferRef = useRef<MaskBuffer | null>(null);
+  /** Hand-painted labels only; never updated by ML load/refine/merge. */
+  const userDrawnMaskRef = useRef<Uint8Array | null>(null);
+  const userDrawnUndoStack = useRef<Uint8Array[]>([]);
+  const userDrawnRedoStack = useRef<Uint8Array[]>([]);
   const maskToNativeScaleRef = useRef(1);
   const isStrokingRef = useRef(false);
   const lastPointRef = useRef<Point2D | null>(null);
@@ -82,6 +97,16 @@ export function FrameEditorPage() {
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [viewerVersion, setViewerVersion] = useState(0);
+  const [refining, setRefining] = useState(false);
+  const [downloadMenuAnchor, setDownloadMenuAnchor] = useState<HTMLElement | null>(null);
+
+  const mlOffline = useSettingsStore((s) => s.mlOffline);
+  const strokeHintRef = useRef<Uint8Array | null>(null);
+  const strokeClassRef = useRef<MaskClassKey | null>(null);
+  const refineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refineInFlightRef = useRef(false);
+  const manualSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const manualSaveInFlightRef = useRef(false);
 
   const dirtyRef = useRef(false);
   useEffect(() => {
@@ -89,6 +114,88 @@ export function FrameEditorPage() {
   }, [dirty]);
 
   const talcThreshold = deposit?.talcThreshold ?? 0.1;
+  const talcValue = MASK_CLASSES.talc.value;
+  const coarseValue = MASK_CLASSES.coarse.value;
+  const canRefineCalibration =
+    !mlOffline && !!frame?.backendImageId && activeClass !== 'matrix' && tool !== 'eraser';
+
+  const isArchivableStrokeClass = (cls: MaskClassKey) => cls === 'talc' || cls === 'coarse';
+
+  const userDrawnBuffer = useCallback((): MaskBuffer | null => {
+    const data = userDrawnMaskRef.current;
+    const main = maskBufferRef.current;
+    if (!data || !main) return null;
+    return { width: main.width, height: main.height, data };
+  }, []);
+
+  const snapshotBeforePaintEdit = useCallback(() => {
+    if (!maskBufferRef.current) return;
+    undoRedo.snapshotBeforeEdit(maskBufferRef.current.data);
+    if (userDrawnMaskRef.current) {
+      userDrawnUndoStack.current.push(userDrawnMaskRef.current.slice());
+      userDrawnRedoStack.current = [];
+    }
+  }, [undoRedo]);
+
+  const beginStrokeHint = useCallback(() => {
+    if (!isArchivableStrokeClass(activeClass) || tool === 'eraser' || compareMode || !maskBufferRef.current) {
+      return;
+    }
+    strokeClassRef.current = activeClass;
+    strokeHintRef.current = new Uint8Array(maskBufferRef.current.data.length);
+  }, [activeClass, tool, compareMode]);
+
+  const markHintInRect = useCallback(
+    (rect: { x: number; y: number; w: number; h: number }, paintedValue: number) => {
+      if (!strokeHintRef.current || !maskBufferRef.current || !strokeClassRef.current) return;
+      const expected =
+        strokeClassRef.current === 'talc'
+          ? talcValue
+          : strokeClassRef.current === 'coarse'
+            ? coarseValue
+            : null;
+      if (expected === null || paintedValue !== expected) return;
+      const { width, data } = maskBufferRef.current;
+      const hint = strokeHintRef.current;
+      const x1 = Math.min(width, rect.x + rect.w);
+      const y1 = Math.min(data.length / width, rect.y + rect.h);
+      for (let y = rect.y; y < y1; y++) {
+        for (let x = rect.x; x < x1; x++) {
+          const idx = y * width + x;
+          if (data[idx] === expected) hint[idx] = 1;
+        }
+      }
+    },
+    [coarseValue, talcValue],
+  );
+
+  const archiveDrawnStroke = useCallback(async () => {
+    if (!frame || !experimentId || !maskBufferRef.current) return;
+    const hintWorking = strokeHintRef.current;
+    const strokeClass = strokeClassRef.current;
+    if (!hintWorking?.some((v) => v > 0) || !strokeClass) return;
+
+    const base = {
+      experimentId,
+      frameId: frame.id,
+      frameName: frame.name,
+      hintWorking,
+      workingWidth: maskBufferRef.current.width,
+      workingHeight: maskBufferRef.current.height,
+      nativeWidth: frame.width,
+      nativeHeight: frame.height,
+    };
+
+    try {
+      if (strokeClass === 'talc') {
+        await saveUserTalcStroke(base);
+      } else if (strokeClass === 'coarse') {
+        await saveUserPositivePromptStroke(base);
+      }
+    } catch {
+      // non-fatal
+    }
+  }, [frame, experimentId]);
 
   // Предупреждение при закрытии/обновлении вкладки с несохранёнными правками
   useEffect(() => {
@@ -115,6 +222,8 @@ export function FrameEditorPage() {
     setDirty(false);
     setLiveMetrics(null);
     undoRedo.clear();
+    userDrawnUndoStack.current = [];
+    userDrawnRedoStack.current = [];
     setPolygonPoints([]);
 
     async function load() {
@@ -134,6 +243,7 @@ export function FrameEditorPage() {
       }
       if (cancelled) return;
       maskBufferRef.current = { width: record.width, height: record.height, data: record.data };
+      userDrawnMaskRef.current = new Uint8Array(record.data.length);
       setMaskLoading(false);
       setViewerVersion((v) => v + 1);
     }
@@ -171,6 +281,96 @@ export function FrameEditorPage() {
     setDirty(true);
     if (maskBufferRef.current) setLiveMetrics(calcMetrics(maskBufferRef.current));
   }, []);
+
+  const scheduleCalibrationRefine = useCallback(() => {
+    if (!canRefineCalibration || !frame?.backendImageId || !maskBufferRef.current) return;
+    const hintWorking = strokeHintRef.current;
+    const strokeClass = strokeClassRef.current;
+    if (!hintWorking?.some((v) => v > 0) || !strokeClass) return;
+    const uiClass = UI_CLASS_TO_CALIB_KEY[MASK_CLASSES[strokeClass].value];
+    if (!uiClass) return;
+    if (refineTimerRef.current) clearTimeout(refineTimerRef.current);
+    refineTimerRef.current = setTimeout(() => {
+      void (async () => {
+        if (refineInFlightRef.current || !maskBufferRef.current || !frame.backendImageId) return;
+        refineInFlightRef.current = true;
+        setRefining(true);
+        try {
+          const { width: mw, height: mh } = maskBufferRef.current;
+          const hintNative = upscaleMaskNearest(hintWorking, mw, mh, frame.width, frame.height);
+          const refined = await refineCalibrationFromHint(
+            frame.backendImageId,
+            hintNative,
+            frame.width,
+            frame.height,
+            frame.width,
+            frame.height,
+            uiClass as CalibClassKey,
+          );
+          if (!maskBufferRef.current) return;
+          maskBufferRef.current.data = refined.data;
+          overlayRef.current?.setMask(maskBufferRef.current);
+          markDirty();
+        } catch (err) {
+          if (err instanceof MlUnavailableError) {
+            notify(err.message, 'warning');
+          } else {
+            notify('Не удалось уточнить сегментацию на сервере', 'warning');
+          }
+        } finally {
+          strokeHintRef.current = null;
+          refineInFlightRef.current = false;
+          setRefining(false);
+        }
+      })();
+    }, 400);
+  }, [canRefineCalibration, frame, markDirty]);
+
+  const scheduleServerManualMaskSave = useCallback(() => {
+    if (mlOffline || !frame || !experimentId || !maskBufferRef.current) return;
+    if (manualSaveTimerRef.current) clearTimeout(manualSaveTimerRef.current);
+    manualSaveTimerRef.current = setTimeout(() => {
+      void (async () => {
+        if (manualSaveInFlightRef.current || !userDrawnMaskRef.current || !maskBufferRef.current || !frame) {
+          return;
+        }
+        manualSaveInFlightRef.current = true;
+        try {
+          const resp = await saveUserDrawnMaskToServer(
+            frame,
+            userDrawnMaskRef.current,
+            maskBufferRef.current.width,
+            maskBufferRef.current.height,
+          );
+          if (!frame.backendImageId) {
+            updateFrame(experimentId, frame.id, { backendImageId: resp.image_id });
+          }
+        } catch {
+          // Non-fatal dev sync; browser download remains available.
+        } finally {
+          manualSaveInFlightRef.current = false;
+        }
+      })();
+    }, 500);
+  }, [mlOffline, frame, experimentId, updateFrame]);
+
+  const finishDrawnStroke = useCallback(() => {
+    const strokeClass = strokeClassRef.current;
+    void archiveDrawnStroke();
+    if (strokeClass && UI_CLASS_TO_CALIB_KEY[MASK_CLASSES[strokeClass].value]) {
+      scheduleCalibrationRefine();
+    }
+    scheduleServerManualMaskSave();
+    strokeClassRef.current = null;
+  }, [archiveDrawnStroke, scheduleCalibrationRefine, scheduleServerManualMaskSave]);
+
+  useEffect(
+    () => () => {
+      if (refineTimerRef.current) clearTimeout(refineTimerRef.current);
+      if (manualSaveTimerRef.current) clearTimeout(manualSaveTimerRef.current);
+    },
+    [],
+  );
 
   // Разрешение конфликта навигации: сохранить и продолжить / не сохранять / отмена
   const handleBlockedSave = useCallback(async () => {
@@ -259,12 +459,17 @@ export function FrameEditorPage() {
       return;
     }
     if (tool === 'fill') {
-      undoRedo.snapshotBeforeEdit(maskBufferRef.current.data);
+      snapshotBeforePaintEdit();
+      beginStrokeHint();
       const fillValue = e.altKey ? 0 : MASK_CLASSES[activeClass].value;
       const rect = floodFill(maskBufferRef.current, p.x, p.y, fillValue);
+      const userBuf = userDrawnBuffer();
+      if (userBuf) floodFill(userBuf, p.x, p.y, fillValue);
       if (rect) {
         overlayRef.current?.updateRegion(rect.x, rect.y, rect.w, rect.h);
+        markHintInRect(rect, fillValue);
         markDirty();
+        finishDrawnStroke();
       }
       return;
     }
@@ -273,13 +478,18 @@ export function FrameEditorPage() {
       lassoEraseRef.current = e.altKey;
       lassoPointsRef.current = [p];
       setLassoPointCount(1);
+      beginStrokeHint();
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
       return;
     }
-    undoRedo.snapshotBeforeEdit(maskBufferRef.current.data);
+    snapshotBeforePaintEdit();
+    beginStrokeHint();
     const value = tool === 'eraser' ? 0 : MASK_CLASSES[activeClass].value;
     const rect = stampSegment(maskBufferRef.current, p.x, p.y, p.x, p.y, brushRadius, value);
+    const userBuf = userDrawnBuffer();
+    if (userBuf) stampSegment(userBuf, p.x, p.y, p.x, p.y, brushRadius, value);
     overlayRef.current?.updateRegion(rect.x, rect.y, rect.w, rect.h);
+    markHintInRect(rect, value);
     isStrokingRef.current = true;
     lastPointRef.current = p;
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -307,7 +517,10 @@ export function FrameEditorPage() {
     if (!p) return;
     const value = tool === 'eraser' ? 0 : MASK_CLASSES[activeClass].value;
     const rect = stampSegment(maskBufferRef.current, lastPointRef.current.x, lastPointRef.current.y, p.x, p.y, brushRadius, value);
+    const userBuf = userDrawnBuffer();
+    if (userBuf) stampSegment(userBuf, lastPointRef.current.x, lastPointRef.current.y, p.x, p.y, brushRadius, value);
     overlayRef.current?.updateRegion(rect.x, rect.y, rect.w, rect.h);
+    markHintInRect(rect, value);
     lastPointRef.current = p;
   };
 
@@ -319,12 +532,16 @@ export function FrameEditorPage() {
       setLassoPointCount(0);
       overlayRef.current?.setPreview(null);
       if (points.length >= 3 && maskBufferRef.current) {
-        undoRedo.snapshotBeforeEdit(maskBufferRef.current.data);
+        snapshotBeforePaintEdit();
         const value = lassoEraseRef.current ? 0 : MASK_CLASSES[activeClass].value;
         const rect = rasterizePolygon(maskBufferRef.current, points, value);
+        const userBuf = userDrawnBuffer();
+        if (userBuf) rasterizePolygon(userBuf, points, value);
         if (rect.w > 0 && rect.h > 0) {
           overlayRef.current?.updateRegion(rect.x, rect.y, rect.w, rect.h);
+          markHintInRect(rect, value);
           markDirty();
+          finishDrawnStroke();
         }
       }
       return;
@@ -333,6 +550,7 @@ export function FrameEditorPage() {
     isStrokingRef.current = false;
     lastPointRef.current = null;
     markDirty();
+    finishDrawnStroke();
   };
 
   const closePolygon = useCallback(() => {
@@ -340,31 +558,48 @@ export function FrameEditorPage() {
       setPolygonPoints([]);
       return;
     }
-    undoRedo.snapshotBeforeEdit(maskBufferRef.current.data);
+    snapshotBeforePaintEdit();
+    beginStrokeHint();
     const value = MASK_CLASSES[activeClass].value;
     const rect = rasterizePolygon(maskBufferRef.current, polygonPoints, value);
+    const userBuf = userDrawnBuffer();
+    if (userBuf) rasterizePolygon(userBuf, polygonPoints, value);
     overlayRef.current?.updateRegion(rect.x, rect.y, rect.w, rect.h);
+    markHintInRect(rect, value);
     setPolygonPoints([]);
     markDirty();
-  }, [polygonPoints, activeClass, undoRedo, markDirty]);
+    finishDrawnStroke();
+  }, [polygonPoints, activeClass, snapshotBeforePaintEdit, userDrawnBuffer, markDirty, beginStrokeHint, markHintInRect, finishDrawnStroke]);
 
   const handleUndo = useCallback(() => {
     if (!maskBufferRef.current) return;
     const prev = undoRedo.undo(maskBufferRef.current.data);
     if (!prev) return;
     maskBufferRef.current.data = prev;
+    if (userDrawnMaskRef.current) {
+      userDrawnRedoStack.current.push(userDrawnMaskRef.current.slice());
+      const prevUser = userDrawnUndoStack.current.pop();
+      if (prevUser) userDrawnMaskRef.current = prevUser;
+    }
     overlayRef.current?.setMask(maskBufferRef.current);
     markDirty();
-  }, [undoRedo, markDirty]);
+    scheduleServerManualMaskSave();
+  }, [undoRedo, markDirty, scheduleServerManualMaskSave]);
 
   const handleRedo = useCallback(() => {
     if (!maskBufferRef.current) return;
     const next = undoRedo.redo(maskBufferRef.current.data);
     if (!next) return;
     maskBufferRef.current.data = next;
+    if (userDrawnMaskRef.current) {
+      userDrawnUndoStack.current.push(userDrawnMaskRef.current.slice());
+      const nextUser = userDrawnRedoStack.current.pop();
+      if (nextUser) userDrawnMaskRef.current = nextUser;
+    }
     overlayRef.current?.setMask(maskBufferRef.current);
     markDirty();
-  }, [undoRedo, markDirty]);
+    scheduleServerManualMaskSave();
+  }, [undoRedo, markDirty, scheduleServerManualMaskSave]);
 
   const handleRevertToAuto = useCallback(async () => {
     if (!frame?.autoMaskId || !maskBufferRef.current) return;
@@ -379,12 +614,40 @@ export function FrameEditorPage() {
 
   const handleClearMask = useCallback(() => {
     if (!maskBufferRef.current) return;
-    undoRedo.snapshotBeforeEdit(maskBufferRef.current.data);
+    snapshotBeforePaintEdit();
     maskBufferRef.current.data.fill(0);
+    userDrawnMaskRef.current?.fill(0);
     overlayRef.current?.setMask(maskBufferRef.current);
     setClearConfirmOpen(false);
     markDirty();
-  }, [undoRedo, markDirty]);
+    scheduleServerManualMaskSave();
+  }, [snapshotBeforePaintEdit, markDirty, scheduleServerManualMaskSave]);
+
+  const handleDownloadManualMask = useCallback(
+    async (format: 'colored' | 'grayscale') => {
+      setDownloadMenuAnchor(null);
+      if (!userDrawnMaskRef.current || !maskBufferRef.current || !frame) return;
+      if (!userDrawnMaskHasInk(userDrawnMaskRef.current)) {
+        notify('Нет ручной разметки для экспорта', 'info');
+        return;
+      }
+      try {
+        await downloadUserDrawnMask({
+          labels: userDrawnMaskRef.current,
+          workingWidth: maskBufferRef.current.width,
+          workingHeight: maskBufferRef.current.height,
+          nativeWidth: frame.width,
+          nativeHeight: frame.height,
+          frameName: frame.name,
+          format,
+        });
+        notify('Ручная маска сохранена в файл', 'success');
+      } catch {
+        notify('Не удалось сохранить маску', 'error');
+      }
+    },
+    [frame],
+  );
 
   const frameIndex = experiment?.frames.findIndex((f) => f.id === frameId) ?? -1;
   const goToFrame = useCallback(
@@ -472,6 +735,35 @@ export function FrameEditorPage() {
         )}
         {compareMode && <Chip label="Режим сравнения с авторазметкой" color="secondary" size="small" />}
         {dirty && <Chip label="Есть несохранённые изменения" color="warning" size="small" variant="outlined" />}
+        {refining && (
+          <Chip
+            icon={<CircularProgress size={12} />}
+            label="Уточнение сегментации…"
+            size="small"
+            variant="outlined"
+          />
+        )}
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<DownloadIcon fontSize="small" />}
+          onClick={(e) => setDownloadMenuAnchor(e.currentTarget)}
+          disabled={maskLoading || mlOffline}
+        >
+          Скачать локально
+        </Button>
+        <Menu
+          anchorEl={downloadMenuAnchor}
+          open={Boolean(downloadMenuAnchor)}
+          onClose={() => setDownloadMenuAnchor(null)}
+        >
+          <MenuItem onClick={() => void handleDownloadManualMask('colored')}>
+            Цветная PNG (полное разрешение)
+          </MenuItem>
+          <MenuItem onClick={() => void handleDownloadManualMask('grayscale')}>
+            Оттенки серого (индексы классов)
+          </MenuItem>
+        </Menu>
         <Button
           variant="contained"
           size="small"

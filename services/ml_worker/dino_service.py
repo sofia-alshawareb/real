@@ -32,12 +32,12 @@ class DinoInferenceService:
     def _validate_config(self) -> None:
         if self.config.num_blocks != 12:
             raise ValueError(
-                f"dino.num_blocks must be 12 for block-11 extraction, got {self.config.num_blocks}"
+                f"dino.num_blocks must be 12 for block extraction, got {self.config.num_blocks}"
             )
-        blocks = list(self.config.inference_blocks)
-        if sorted(blocks) != [1, 11]:
+        blocks = [int(b) for b in self.config.inference_blocks]
+        if 1 not in blocks:
             raise ValueError(
-                f"dino.inference_blocks must be [1, 11], got {blocks}"
+                f"dino.inference_blocks must include block 1, got {blocks}"
             )
         validate_block_indices(self.config.num_blocks, blocks)
 

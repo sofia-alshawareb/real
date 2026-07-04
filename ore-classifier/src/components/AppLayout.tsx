@@ -100,10 +100,14 @@ export function AppLayout() {
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <FormControlLabel
               control={<Switch checked={mlOffline} onChange={(e) => setMlOffline(e.target.checked)} color="warning" />}
-              label="Демо: имитация сбоя анализа"
+              label="Демо: локальная имитация ML"
             />
             <Tooltip
-              title="Включите, чтобы имитировать недоступность сервиса ML-анализа: новые кадры уходят в очередь и ждут либо ручной разметки, либо восстановления сервиса (переключатель снова в положение «выкл»)."
+              title={
+                mlOffline
+                  ? 'Включено: сегментация выполняется локально (демо), без сервера ML.'
+                  : 'Выключено: сегментация через сервер ML (нужен запущенный backend на /api/v1).'
+              }
             >
               <InfoOutlinedIcon fontSize="small" sx={{ color: 'text.secondary', cursor: 'help' }} />
             </Tooltip>

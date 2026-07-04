@@ -9,16 +9,20 @@ import torch
 from ml.lib.constants import (
     CLASS_COLORS,
     CLASS_NAMES,
+    DEFAULT_MIN_BACKPROJ_SCORE,
+    DEFAULT_MIN_COSINE_SIM,
     DEFAULT_REGION_OVERLAP,
-    REGION_MAP_DINO,
+    DEFAULT_FG_DILATE_RADIUS,
+    DEFAULT_TALC_BLACK_MAX,
+    SEGMENTATION_MODE_INTENSITY,
 )
 
 
 @dataclass
 class SegmentConfig:
-    region_map: str = REGION_MAP_DINO
+    segmentation_mode: str = SEGMENTATION_MODE_INTENSITY
     num_blocks: int = 12
-    block_index: int = 1
+    block_index: int = 11
     preprocess: bool = False
     denoise: bool = True
     illum_sigma: float = 64.0
@@ -26,6 +30,11 @@ class SegmentConfig:
     random_state: int = 0
     region_overlap: float = DEFAULT_REGION_OVERLAP
     close_radius: int = 3
+    min_backproj_score: float = DEFAULT_MIN_BACKPROJ_SCORE
+    min_cosine_sim: float = DEFAULT_MIN_COSINE_SIM
+    fg_dilate_radius: int = DEFAULT_FG_DILATE_RADIUS
+    talc_black_max: float = DEFAULT_TALC_BLACK_MAX
+    rgb_hist_bins: int = 32
 
 
 @dataclass
@@ -79,10 +88,23 @@ class DinoArtifacts:
 
     @classmethod
     def from_inference(cls, result: DinoInferenceResult) -> DinoArtifacts:
+        h, w = result.native_height, result.native_width
+
+        def _activation(block_index: int) -> np.ndarray:
+            if block_index in result.blocks:
+                return result.activation(block_index)
+            return np.zeros((h, w), dtype=np.float32)
+
+        def _features(block_index: int) -> np.ndarray:
+            if block_index in result.blocks:
+                return result.features(block_index).numpy()
+            ref = result.blocks.get(1) or next(iter(result.blocks.values()))
+            return np.zeros_like(ref.features.numpy())
+
         return cls(
-            block01_activation=result.activation(1),
-            block11_activation=result.activation(11),
-            block01_features=result.features(1).numpy(),
-            block11_features=result.features(11).numpy(),
+            block01_activation=_activation(1),
+            block11_activation=_activation(11),
+            block01_features=_features(1),
+            block11_features=_features(11),
             meta=dict(result.meta),
         )
