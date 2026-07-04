@@ -5,7 +5,7 @@
 import { createNoise2D, type NoiseFunction2D } from 'simplex-noise';
 import { mulberry32 } from './rng';
 
-export type GrainClass = 1 | 2 | 3; // 1=сульфид, 2=gangue (матрица), 3=тальк
+export type GrainClass = 1 | 2 | 3 | 4; // 1=обычные срастания, 2=тонкие срастания, 3=тальк, 4=нерудная матрица
 
 export interface GeologyParams {
   /** Целевая доля площади под тальком, 0..~0.35 */
@@ -98,7 +98,6 @@ function grainBoundaryRadius(noise: NoiseFunction2D, grain: Grain, angle: number
 
 export interface PixelClassification {
   cls: GrainClass;
-  coarse?: boolean;
 }
 
 /** xNorm, yNorm — координаты в диапазоне [0,1) относительно короткой стороны кадра. */
@@ -121,7 +120,7 @@ export function classifyPoint(
         if (dist > grain.radius * 1.45) continue;
         const angle = Math.atan2(ddy, ddx);
         const r = grainBoundaryRadius(boundaryNoise, grain, angle);
-        if (dist <= r) return { cls: 1, coarse: grain.coarse };
+        if (dist <= r) return { cls: grain.coarse ? 1 : 2 };
       }
     }
   }
@@ -129,7 +128,7 @@ export function classifyPoint(
   const nv = (talcNoise(xNorm * 7, yNorm * 7) + 1) / 2;
   const threshold = 1 - params.talcShare * 2.4;
   if (nv > threshold) return { cls: 3 };
-  return { cls: 2 };
+  return { cls: 4 };
 }
 
 /** Базовый цвет фона-матрицы шлифа (без учёта зёрен) — для процедурной текстуры. */
@@ -143,11 +142,13 @@ export function backgroundRockColor(seed: number, xNorm: number, yNorm: number):
 export function classColor(cls: GrainClass): [number, number, number] {
   switch (cls) {
     case 1:
-      return [214, 158, 46]; // сульфид — тёплый янтарный (имитация жёлтых сульфидов в отражённом свете)
+      return [46, 125, 50]; // обычные срастания — зелёный
+    case 2:
+      return [198, 40, 40]; // тонкие срастания — красный
     case 3:
-      return [58, 84, 78]; // тальк — тёмно-бирюзовый
+      return [21, 101, 192]; // тальк — синий
     default:
-      return [176, 176, 180]; // gangue
+      return [158, 158, 158]; // нерудная матрица — серый
   }
 }
 
@@ -245,7 +246,7 @@ export function renderTextureTile(
       const { cls } = classifyPoint(seed, xNorm, yNorm, params);
       const bg = backgroundRockColor(seed, xNorm, yNorm);
       let color: [number, number, number];
-      if (cls === 2) {
+      if (cls === 4) {
         color = bg;
       } else {
         const [cr, cg, cb] = classColor(cls);

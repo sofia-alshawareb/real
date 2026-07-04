@@ -42,8 +42,10 @@ export function DepositsPage() {
         id: d.id,
         name: d.name,
         code: d.code,
+        oreCluster: d.oreCluster ?? '—',
         talcThreshold: d.talcThreshold,
         mineralsCount: d.minerals.length,
+        balance: d.reserves?.balance ?? '—',
         archived: d.archived,
         updatedAt: d.updatedAt,
         raw: d,
@@ -53,14 +55,16 @@ export function DepositsPage() {
 
   const columns: GridColDef[] = [
     { field: 'name', headerName: 'Название', flex: 1, minWidth: 180 },
-    { field: 'code', headerName: 'Код', width: 100 },
+    { field: 'code', headerName: 'Код', width: 90 },
+    { field: 'oreCluster', headerName: 'Рудный узел', flex: 1, minWidth: 170 },
     {
       field: 'talcThreshold',
       headerName: 'Порог талька',
-      width: 130,
+      width: 120,
       valueFormatter: (value: number) => formatPercent(value),
     },
-    { field: 'mineralsCount', headerName: 'Минералов', width: 110, align: 'center', headerAlign: 'center' },
+    { field: 'mineralsCount', headerName: 'Минералов', width: 100, align: 'center', headerAlign: 'center' },
+    { field: 'balance', headerName: 'Балансовые запасы', width: 150 },
     {
       field: 'archived',
       headerName: 'Статус',
@@ -104,7 +108,18 @@ export function DepositsPage() {
     },
   ];
 
-  const handleSave = (data: { name: string; code: string; talcThreshold: number; notes?: string; minerals: Deposit['minerals'] }) => {
+  const handleSave = (data: {
+    name: string;
+    code: string;
+    talcThreshold: number;
+    notes?: string;
+    minerals: Deposit['minerals'];
+    oreCluster?: string;
+    region?: string;
+    oreTypes?: string[];
+    reserves?: Deposit['reserves'];
+    metalGrades?: Deposit['metalGrades'];
+  }) => {
     if (editingDeposit) {
       updateDeposit(editingDeposit.id, { ...data, updatedBy: author });
       notify('Месторождение обновлено', 'success');

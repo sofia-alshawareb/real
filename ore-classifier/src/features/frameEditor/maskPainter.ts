@@ -112,3 +112,45 @@ export function rasterizePolygon(mask: MaskLike, points: Point2D[], value: numbe
 export function imagePointToMask(imgX: number, imgY: number, maskToNativeScale: number): Point2D {
   return { x: imgX / maskToNativeScale, y: imgY / maskToNativeScale };
 }
+
+/**
+ * Инструмент "заливка": перекрашивает всю смежную область того же класса,
+ * что и пиксель под курсором, в новое значение (4-связность, стек вместо рекурсии).
+ */
+export function floodFill(mask: MaskLike, startX: number, startY: number, newValue: number): DirtyRect | null {
+  const x0 = Math.round(startX);
+  const y0 = Math.round(startY);
+  if (x0 < 0 || y0 < 0 || x0 >= mask.width || y0 >= mask.height) return null;
+  const startIdx = y0 * mask.width + x0;
+  const targetValue = mask.data[startIdx];
+  if (targetValue === newValue) return null;
+
+  let minX = x0;
+  let minY = y0;
+  let maxX = x0;
+  let maxY = y0;
+  const stack: number[] = [startIdx];
+  mask.data[startIdx] = newValue;
+  while (stack.length) {
+    const idx = stack.pop()!;
+    const x = idx % mask.width;
+    const y = (idx - x) / mask.width;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+    const neighbors = [
+      x > 0 ? idx - 1 : -1,
+      x < mask.width - 1 ? idx + 1 : -1,
+      y > 0 ? idx - mask.width : -1,
+      y < mask.height - 1 ? idx + mask.width : -1,
+    ];
+    for (const n of neighbors) {
+      if (n >= 0 && mask.data[n] === targetValue) {
+        mask.data[n] = newValue;
+        stack.push(n);
+      }
+    }
+  }
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}

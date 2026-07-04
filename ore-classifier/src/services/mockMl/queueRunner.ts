@@ -50,7 +50,7 @@ async function processItem(item: QueueItem): Promise<void> {
 
     const deposit = useDepositsStore.getState().getDeposit(experiment.depositId);
     const threshold = deposit?.talcThreshold ?? 0.1;
-    const metrics = calcMetrics({ width: seg.mw, height: seg.mh, data: seg.data }, frame.pixelSizeUm, seg.maskToNativeScale);
+    const metrics = calcMetrics({ width: seg.mw, height: seg.mh, data: seg.data });
     const { oreClass, reason } = classifyFrame(metrics, threshold);
 
     expStore.setFrameResult(item.experimentId, item.frameId, {

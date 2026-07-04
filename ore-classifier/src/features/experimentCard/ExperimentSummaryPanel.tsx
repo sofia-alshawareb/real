@@ -100,7 +100,7 @@ export function ExperimentSummaryPanel({
         </Box>
         <Stack direction="row" spacing={1}>
           <Button variant="outlined" startIcon={<TuneIcon />} onClick={() => setWhatIfOpen((v) => !v)}>
-            Что если?
+            Порог доли талька
           </Button>
           <Button variant="outlined" startIcon={<DescriptionIcon />} onClick={onGoToReport}>
             Сформировать отчёт
@@ -113,7 +113,7 @@ export function ExperimentSummaryPanel({
       <Collapse in={whatIfOpen}>
         <Divider sx={{ my: 2 }} />
         <Typography variant="subtitle2" gutterBottom>
-          What-if: порог доли талька
+          Порог доли талька: предпросмотр
         </Typography>
         <Typography
           variant="caption"
@@ -172,7 +172,7 @@ export function ExperimentSummaryPanel({
               <Typography variant="caption" sx={{
                 color: "text.secondary"
               }}>
-                Крупные срастания
+                Обычные срастания
               </Typography>
               <Typography variant="h6">{formatPercent(avgMetrics.coarseFraction)}</Typography>
             </Box>

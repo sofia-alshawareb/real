@@ -2,6 +2,78 @@ import { useEffect, useRef } from 'react';
 import type { Frame } from '../types/models';
 import { paramsForSeed, classifyPoint, backgroundRockColor, classColor } from '../services/grainModel';
 import { getTile, getMask } from '../db/imageRepo';
+import { TILE_SIZE } from '../services/tiling/tileImporter';
+
+/**
+ * Собирает миниатюру загруженного (dexie) кадра из тайлов подходящего уровня пирамиды.
+ * Уровень 0 — самый мелкий (почти всё изображение сжато в один тайл), поэтому рисовать его
+ * растянутым на всю миниатюру даёт почти однородную тёмную заливку ("чёрное" изображение).
+ * Здесь выбирается минимальный уровень, чья длинная сторона не меньше стороны миниатюры.
+ */
+async function drawDexieOriginal(
+  ctx: CanvasRenderingContext2D,
+  imageId: string,
+  frameWidth: number,
+  frameHeight: number,
+  width: number,
+  height: number,
+): Promise<void> {
+  const maxLevel = Math.ceil(Math.log2(Math.max(frameWidth, frameHeight, 1)));
+  const targetLongSide = Math.max(width, height);
+
+  let renderLevel = maxLevel;
+  for (let level = 0; level <= maxLevel; level++) {
+    const scale = 1 / Math.pow(2, maxLevel - level);
+    const longSide = Math.max(frameWidth, frameHeight) * scale;
+    if (longSide >= targetLongSide) {
+      renderLevel = level;
+      break;
+    }
+  }
+
+  const scale = 1 / Math.pow(2, maxLevel - renderLevel);
+  const lw = Math.max(1, Math.round(frameWidth * scale));
+  const lh = Math.max(1, Math.round(frameHeight * scale));
+  const numX = Math.ceil(lw / TILE_SIZE);
+  const numY = Math.ceil(lh / TILE_SIZE);
+  const sx = width / lw;
+  const sy = height / lh;
+
+  const tileCoords: Array<{ tx: number; ty: number }> = [];
+  for (let ty = 0; ty < numY; ty++) {
+    for (let tx = 0; tx < numX; tx++) tileCoords.push({ tx, ty });
+  }
+
+  const tiles = await Promise.all(
+    tileCoords.map(async ({ tx, ty }) => {
+      const record = await getTile(imageId, renderLevel, tx, ty);
+      return { tx, ty, record };
+    }),
+  );
+
+  let drewAny = false;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  for (const { tx, ty, record } of tiles) {
+    if (!record) continue;
+    const tw = Math.min(TILE_SIZE, lw - tx * TILE_SIZE);
+    const th = Math.min(TILE_SIZE, lh - ty * TILE_SIZE);
+    const bitmap = await createImageBitmap(record.blob);
+    ctx.drawImage(bitmap, tx * TILE_SIZE * sx, ty * TILE_SIZE * sy, tw * sx, th * sy);
+    bitmap.close();
+    drewAny = true;
+  }
+
+  if (!drewAny) {
+    // Фолбэк на самый мелкий уровень, если на выбранном уровне тайлов не нашлось.
+    const fallback = await getTile(imageId, 0, 0, 0);
+    if (fallback) {
+      const bitmap = await createImageBitmap(fallback.blob);
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      bitmap.close();
+    }
+  }
+}
 
 export async function drawFrameThumbnail(
   ctx: CanvasRenderingContext2D,
@@ -39,12 +111,7 @@ export async function drawFrameThumbnail(
     }
     ctx.putImageData(imgData, 0, 0);
   } else {
-    const tile = await getTile(frame.source.imageId, 0, 0, 0);
-    if (tile) {
-      const bitmap = await createImageBitmap(tile.blob);
-      ctx.drawImage(bitmap, 0, 0, width, height);
-      bitmap.close();
-    }
+    await drawDexieOriginal(ctx, frame.source.imageId, frame.width, frame.height, width, height);
   }
 
   if (showMask && frame.maskId) {
@@ -60,14 +127,22 @@ export async function drawFrameThumbnail(
           const v = data[rowOffset + mx];
           const idx = (j * width + i) * 4;
           if (v === 1) {
-            maskImgData.data[idx] = 255;
-            maskImgData.data[idx + 1] = 179;
-            maskImgData.data[idx + 2] = 0;
+            // обычные срастания — зелёный
+            maskImgData.data[idx] = 46;
+            maskImgData.data[idx + 1] = 125;
+            maskImgData.data[idx + 2] = 50;
+            maskImgData.data[idx + 3] = 140;
+          } else if (v === 2) {
+            // тонкие срастания — красный
+            maskImgData.data[idx] = 198;
+            maskImgData.data[idx + 1] = 40;
+            maskImgData.data[idx + 2] = 40;
             maskImgData.data[idx + 3] = 140;
           } else if (v === 3) {
-            maskImgData.data[idx] = 0;
-            maskImgData.data[idx + 1] = 105;
-            maskImgData.data[idx + 2] = 92;
+            // тальк — синий
+            maskImgData.data[idx] = 21;
+            maskImgData.data[idx + 1] = 101;
+            maskImgData.data[idx + 2] = 192;
             maskImgData.data[idx + 3] = 140;
           } else {
             maskImgData.data[idx + 3] = 0;

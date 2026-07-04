@@ -17,7 +17,7 @@ import { HexColorPicker } from 'react-colorful';
 import type { Mineral, MineralRole } from '../../types/models';
 import { genId } from '../../stores/experimentsStore';
 
-const ROLE_LABELS: Record<MineralRole, string> = {
+export const ROLE_LABELS: Record<MineralRole, string> = {
   sulfide: 'Сульфид',
   talc: 'Тальк',
   gangue: 'Нерудная матрица',

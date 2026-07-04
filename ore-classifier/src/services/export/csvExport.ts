@@ -14,10 +14,10 @@ export function buildCsv(experiment: Experiment, deposit?: Deposit): string {
       Статус: f.status,
       Класс: effectiveClass ? ORE_CLASS_META[effectiveClass].label : '',
       'Правка вручную': f.manualClassOverride ? 'да' : 'нет',
-      'Доля талька': f.metrics ? formatPercent(f.metrics.talcFraction) : '',
-      'Доля сульфидов': f.metrics ? formatPercent(f.metrics.sulfideFraction) : '',
-      'Крупные срастания': f.metrics ? formatPercent(f.metrics.coarseFraction) : '',
+      'Доля сульфидов (всего)': f.metrics ? formatPercent(f.metrics.sulfideFraction) : '',
+      'Обычные срастания': f.metrics ? formatPercent(f.metrics.coarseFraction) : '',
       'Тонкие срастания': f.metrics ? formatPercent(f.metrics.fineFraction) : '',
+      'Доля талька': f.metrics ? formatPercent(f.metrics.talcFraction) : '',
       Уверенность: f.confidence !== undefined ? `${Math.round(f.confidence * 100)}%` : '',
       Обновлён: formatDateTime(f.updatedAt),
     };

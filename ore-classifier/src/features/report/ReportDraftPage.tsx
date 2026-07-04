@@ -13,6 +13,7 @@ import Grid from '@mui/material/Grid';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import TableChartIcon from '@mui/icons-material/TableChart';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { pdf } from '@react-pdf/renderer';
 import { db } from '../../db/db';
 import { useExperimentsStore } from '../../stores/experimentsStore';
@@ -21,19 +22,25 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { FramePicker } from './FramePicker';
 import { ReportPreview } from './ReportPreview';
 import { downloadCsv } from '../../services/export/csvExport';
-import { ReportPdf } from '../../services/export/ReportPdf';
+import { ReportPdf, type FrameThumbnailPair } from '../../services/export/ReportPdf';
 import { getFrameThumbnailDataUrl } from '../../components/FrameThumbnail';
-import type { ReportDraft } from '../../types/models';
+import { buildConclusionText } from '../../services/reportConclusion';
+import type { Deposit, Experiment, ReportDraft } from '../../types/models';
 import { notify } from '../../utils/toast';
 
-function buildDefaultDraft(experimentId: string, title: string, frameIds: string[]): ReportDraft {
+function buildDefaultDraft(experiment: Experiment, deposit?: Deposit): ReportDraft {
+  const mineralNotes: Record<string, string> = {};
+  deposit?.minerals.forEach((m) => {
+    if (m.note) mineralNotes[m.id] = m.note;
+  });
   return {
-    experimentId,
-    intro: `Проведён анализ панорамных OM-изображений полированных шлифов в рамках эксперимента «${title}». Ниже приведены результаты автоматической и ручной классификации по кадрам.`,
-    conclusion: '',
+    experimentId: experiment.id,
+    intro: `Проведён анализ панорамных OM-изображений полированных шлифов в рамках эксперимента «${experiment.title}». Ниже приведены результаты автоматической и ручной классификации по кадрам.`,
+    conclusion: buildConclusionText(experiment),
     recommendations: '',
-    includedFrameIds: frameIds,
+    includedFrameIds: experiment.frames.map((f) => f.id),
     snapshotAt: Date.now(),
+    mineralNotes,
   };
 }
 
@@ -52,7 +59,7 @@ export function ReportDraftPage() {
   useEffect(() => {
     if (!experiment) return;
     void db.reportDrafts.get(experiment.id).then((existing) => {
-      setDraft(existing ?? buildDefaultDraft(experiment.id, experiment.title, experiment.frames.map((f) => f.id)));
+      setDraft(existing ?? buildDefaultDraft(experiment, deposit));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [experiment?.id]);
@@ -81,6 +88,20 @@ export function ReportDraftPage() {
 
   const handleRefreshSnapshot = () => updateDraft({ snapshotAt: Date.now() });
 
+  const handleMineralNoteChange = (mineralId: string, text: string) => {
+    updateDraft({ mineralNotes: { ...draft?.mineralNotes, [mineralId]: text } });
+  };
+
+  const handleGenerateConclusion = () => {
+    if (!experiment) return;
+    const text = buildConclusionText(experiment);
+    if (!text) {
+      notify('Недостаточно метрик для автогенерации вывода', 'warning');
+      return;
+    }
+    updateDraft({ conclusion: text });
+  };
+
   const handleExportCsv = () => {
     if (!experiment) return;
     downloadCsv(experiment, deposit);
@@ -93,9 +114,13 @@ export function ReportDraftPage() {
     setExportingPdf(true);
     try {
       const includedFrames = experiment.frames.filter((f) => draft.includedFrameIds.includes(f.id));
-      const thumbnails: Record<string, string> = {};
+      const thumbnails: Record<string, FrameThumbnailPair> = {};
       for (const f of includedFrames) {
-        thumbnails[f.id] = await getFrameThumbnailDataUrl(f, 320, 200, true);
+        const [original, masked] = await Promise.all([
+          getFrameThumbnailDataUrl(f, 320, 200, false),
+          getFrameThumbnailDataUrl(f, 320, 200, true),
+        ]);
+        thumbnails[f.id] = { original, masked };
       }
       const blob = await pdf(<ReportPdf experiment={experiment} deposit={deposit} draft={draft} frameThumbnails={thumbnails} />).toBlob();
       const url = URL.createObjectURL(blob);
@@ -169,13 +194,19 @@ export function ReportDraftPage() {
                 value={draft.intro}
                 onChange={(e) => updateDraft({ intro: e.target.value })}
               />
-              <TextField
-                label="Выводы"
-                multiline
-                minRows={3}
-                value={draft.conclusion}
-                onChange={(e) => updateDraft({ conclusion: e.target.value })}
-              />
+              <Box>
+                <TextField
+                  label="Выводы"
+                  multiline
+                  minRows={3}
+                  fullWidth
+                  value={draft.conclusion}
+                  onChange={(e) => updateDraft({ conclusion: e.target.value })}
+                />
+                <Button size="small" startIcon={<AutoAwesomeIcon />} sx={{ mt: 0.5 }} onClick={handleGenerateConclusion}>
+                  Сгенерировать автоматически
+                </Button>
+              </Box>
               <TextField
                 label="Рекомендации"
                 multiline
@@ -195,7 +226,12 @@ export function ReportDraftPage() {
         </Grid>
 
         <Grid size={{ xs: 12, md: 6 }}>
-          <ReportPreview experiment={experiment} deposit={deposit} draft={draft} />
+          <ReportPreview
+            experiment={experiment}
+            deposit={deposit}
+            draft={draft}
+            onMineralNoteChange={handleMineralNoteChange}
+          />
         </Grid>
       </Grid>
     </Box>

@@ -15,7 +15,27 @@ import { useExperimentsStore } from '../../stores/experimentsStore';
 import { useDepositsStore } from '../../stores/depositsStore';
 import { EmptyState } from '../../components/EmptyState';
 import { ORE_CLASS_META } from '../../theme/palette';
-import type { OreClass } from '../../types/models';
+import type { Experiment, OreClass } from '../../types/models';
+
+function computeWeeklyData(experiments: Experiment[]) {
+  const byWeek = new Map<string, { count: number; talcSum: number; talcN: number }>();
+  experiments.forEach((e) => {
+    const week = new Date(e.createdAt);
+    const key = `${week.getFullYear()}-${String(Math.ceil(week.getDate() / 7)).padStart(2, '0')}-${week.getMonth() + 1}`;
+    const entry = byWeek.get(key) ?? { count: 0, talcSum: 0, talcN: 0 };
+    entry.count++;
+    e.frames.forEach((f) => {
+      if (f.metrics) {
+        entry.talcSum += f.metrics.talcFraction;
+        entry.talcN++;
+      }
+    });
+    byWeek.set(key, entry);
+  });
+  return Array.from(byWeek.entries())
+    .sort((a, b) => (a[0] > b[0] ? 1 : -1))
+    .map(([week, v]) => ({ week, count: v.count, avgTalc: v.talcN ? (v.talcSum / v.talcN) * 100 : 0 }));
+}
 
 function KpiCard({ label, value }: { label: string; value: string | number }) {
   return (
@@ -52,25 +72,11 @@ export function DashboardPage() {
     });
   }, [deposits, experiments]);
 
-  const weeklyData = useMemo(() => {
-    const byWeek = new Map<string, { count: number; talcSum: number; talcN: number }>();
-    experiments.forEach((e) => {
-      const week = new Date(e.createdAt);
-      const key = `${week.getFullYear()}-${String(Math.ceil(week.getDate() / 7)).padStart(2, '0')}-${week.getMonth() + 1}`;
-      const entry = byWeek.get(key) ?? { count: 0, talcSum: 0, talcN: 0 };
-      entry.count++;
-      e.frames.forEach((f) => {
-        if (f.metrics) {
-          entry.talcSum += f.metrics.talcFraction;
-          entry.talcN++;
-        }
-      });
-      byWeek.set(key, entry);
-    });
-    return Array.from(byWeek.entries())
-      .sort((a, b) => (a[0] > b[0] ? 1 : -1))
-      .map(([week, v]) => ({ week, count: v.count, avgTalc: v.talcN ? (v.talcSum / v.talcN) * 100 : 0 }));
-  }, [experiments]);
+  const weeklyByDeposit = useMemo(() => {
+    return deposits
+      .map((d) => ({ deposit: d, data: computeWeeklyData(experiments.filter((e) => e.depositId === d.id)) }))
+      .filter((entry) => entry.data.length > 0);
+  }, [deposits, experiments]);
 
   const modeCounts = useMemo(() => {
     const counts = { ml: 0, manual: 0, mixed: 0 };
@@ -121,9 +127,12 @@ export function DashboardPage() {
               Классы руды по месторождениям
             </Typography>
             <BarChart
-              height={300}
+              layout="horizontal"
+              height={Math.max(300, classByDeposit.length * 34)}
+              margin={{ left: 170 }}
               dataset={classByDeposit}
-              xAxis={[{ scaleType: 'band', dataKey: 'deposit' }]}
+              yAxis={[{ scaleType: 'band', dataKey: 'deposit', width: 160 }]}
+              xAxis={[{}]}
               series={[
                 { dataKey: 'routine', label: ORE_CLASS_META.routine.label, color: ORE_CLASS_META.routine.color, stack: 'total' },
                 { dataKey: 'hard', label: ORE_CLASS_META.hard.label, color: ORE_CLASS_META.hard.color, stack: 'total' },
@@ -152,23 +161,37 @@ export function DashboardPage() {
             />
           </Paper>
         </Grid>
-        <Grid size={12}>
-          <Paper variant="outlined" sx={{ p: 2 }}>
-            <Typography variant="subtitle1" gutterBottom>
-              Динамика экспериментов и средней доли талька
-            </Typography>
-            <LineChart
-              height={280}
-              dataset={weeklyData}
-              xAxis={[{ scaleType: 'point', dataKey: 'week' }]}
-              series={[
-                { dataKey: 'count', label: 'Экспериментов', color: '#3B5B7C' },
-                { dataKey: 'avgTalc', label: 'Средняя доля талька, %', color: '#6A1B9A' },
-              ]}
-            />
-          </Paper>
-        </Grid>
       </Grid>
+
+      <Typography variant="h6" sx={{ mt: 4, mb: 2 }}>
+        По месторождениям
+      </Typography>
+      {weeklyByDeposit.length === 0 ? (
+        <Paper variant="outlined" sx={{ p: 3, textAlign: 'center', color: 'text.secondary' }}>
+          Пока недостаточно данных по кадрам, чтобы построить динамику по месторождениям.
+        </Paper>
+      ) : (
+        <Grid container spacing={3}>
+          {weeklyByDeposit.map(({ deposit, data }) => (
+            <Grid key={deposit.id} size={{ xs: 12, md: 6 }}>
+              <Paper variant="outlined" sx={{ p: 2 }}>
+                <Typography variant="subtitle1" gutterBottom>
+                  {deposit.name} — динамика экспериментов и средняя доля талька
+                </Typography>
+                <LineChart
+                  height={260}
+                  dataset={data}
+                  xAxis={[{ scaleType: 'point', dataKey: 'week' }]}
+                  series={[
+                    { dataKey: 'count', label: 'Экспериментов', color: '#3B5B7C' },
+                    { dataKey: 'avgTalc', label: 'Средняя доля талька, %', color: '#6A1B9A' },
+                  ]}
+                />
+              </Paper>
+            </Grid>
+          ))}
+        </Grid>
+      )}
     </Box>
   );
 }

@@ -23,6 +23,7 @@ import MapIcon from '@mui/icons-material/Map';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { useSettingsStore } from '../stores/settingsStore';
 import { resetDemoData } from '../services/seed/seedData';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -62,16 +63,31 @@ export function AppLayout() {
       <AppBar position="fixed" color="inherit" sx={{ zIndex: (t) => t.zIndex.drawer + 1, backgroundColor: '#fff' }}>
         <Toolbar sx={{ gap: 2 }}>
           <InventoryIcon color="primary" />
-          <Typography
-            variant="h6"
-            noWrap
-            component="div"
-            sx={{
-              color: "primary.main",
-              mr: 2
-            }}>
-            Классификация руды по OM-шлифам
-          </Typography>
+          <Box sx={{ mr: 2, minWidth: 0 }}>
+            <Typography
+              variant="subtitle1"
+              noWrap
+              component="div"
+              sx={{
+                fontWeight: 700,
+                color: 'primary.main',
+                lineHeight: 1.2,
+              }}
+            >
+              Команда Real — Норникель AI Science Hack
+            </Typography>
+            <Typography
+              variant="caption"
+              noWrap
+              component="div"
+              sx={{
+                color: 'text.secondary',
+                lineHeight: 1.2,
+              }}
+            >
+              Классификация руды по OM-шлифам
+            </Typography>
+          </Box>
           <Box sx={{ flexGrow: 1 }} />
           <TextField
             label="Автор"
@@ -81,12 +97,17 @@ export function AppLayout() {
             placeholder="Введите имя"
             sx={{ width: 220 }}
           />
-          <Tooltip title="Демонстрация: имитировать недоступность сервиса анализа">
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <FormControlLabel
               control={<Switch checked={mlOffline} onChange={(e) => setMlOffline(e.target.checked)} color="warning" />}
-              label="ML офлайн"
+              label="Демо: имитация сбоя анализа"
             />
-          </Tooltip>
+            <Tooltip
+              title="Включите, чтобы имитировать недоступность сервиса ML-анализа: новые кадры уходят в очередь и ждут либо ручной разметки, либо восстановления сервиса (переключатель снова в положение «выкл»)."
+            >
+              <InfoOutlinedIcon fontSize="small" sx={{ color: 'text.secondary', cursor: 'help' }} />
+            </Tooltip>
+          </Box>
           <IconButton onClick={(e) => setMenuAnchor(e.currentTarget)}>
             <MoreVertIcon />
           </IconButton>

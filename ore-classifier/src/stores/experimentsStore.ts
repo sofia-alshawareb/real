@@ -21,6 +21,7 @@ interface ExperimentsState {
   experiments: Experiment[];
   createExperiment: (input: { title: string; depositId: string; author: string }) => Experiment;
   addFrames: (experimentId: string, frames: Frame[]) => void;
+  removeFrame: (experimentId: string, frameId: string) => void;
   setReferenceFrame: (experimentId: string, frameId: string) => void;
   updateFrame: (experimentId: string, frameId: string, patch: Partial<Frame>, author?: string) => void;
   setFrameResult: (
@@ -97,6 +98,31 @@ export const useExperimentsStore = create<ExperimentsState>()(
             };
           }),
         }));
+      },
+
+      removeFrame: (experimentId, frameId) => {
+        const experiment = get().getExperiment(experimentId);
+        const frame = experiment?.frames.find((f) => f.id === frameId);
+        if (frame) {
+          const imageId = frame.source.kind === 'dexie' ? frame.source.imageId : undefined;
+          void deleteFrameData(frame.id, imageId);
+        }
+        set((s) => ({
+          experiments: s.experiments.map((e) => {
+            if (e.id !== experimentId) return e;
+            const remaining = e.frames.filter((f) => f.id !== frameId).map((f, idx) => ({ ...f, index: idx }));
+            const referenceFrameId = e.referenceFrameId === frameId ? remaining[0]?.id : e.referenceFrameId;
+            return {
+              ...e,
+              frames: remaining.map((f) => ({ ...f, isReference: f.id === referenceFrameId })),
+              referenceFrameId,
+              status: computeStatus(e.status, remaining, false),
+              updatedAt: Date.now(),
+              history: [...e.history, { at: Date.now(), author: e.author, action: `Удалён кадр «${frame?.name ?? frameId}»` }],
+            };
+          }),
+        }));
+        get().recomputeAggregate(experimentId);
       },
 
       setReferenceFrame: (experimentId, frameId) => {

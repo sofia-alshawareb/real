@@ -1,17 +1,20 @@
-import type { OreClass, MineralRole, FrameStatus, ExperimentStatus } from '../types/models';
+import type { OreClass, FrameStatus, ExperimentStatus } from '../types/models';
 
 export interface OreClassMeta {
   label: string;
   color: string;
   bg: string;
-  icon: 'check_circle' | 'warning' | 'layers';
+  icon: 'check_circle' | 'settings' | 'layers';
 }
 
 export const ORE_CLASS_META: Record<OreClass, OreClassMeta> = {
   routine: { label: 'Рядовая', color: '#2E7D32', bg: '#E8F5E9', icon: 'check_circle' },
-  hard: { label: 'Труднообогатимая', color: '#E65100', bg: '#FFF3E0', icon: 'warning' },
+  hard: { label: 'Труднообогатимая', color: '#4527A0', bg: '#EDE7F6', icon: 'settings' },
   talc: { label: 'Оталькованная', color: '#6A1B9A', bg: '#F3E5F5', icon: 'layers' },
 };
+
+/** Классы разметки маски шлифа: обычные/тонкие срастания, тальк, нерудная матрица. */
+export type MaskClassKey = 'coarse' | 'fine' | 'talc' | 'matrix';
 
 export interface MaskClassMeta {
   label: string;
@@ -19,16 +22,11 @@ export interface MaskClassMeta {
   value: number;
 }
 
-export const MASK_CLASSES: Record<Exclude<MineralRole, 'other'>, MaskClassMeta> = {
-  sulfide: { label: 'Сульфид', color: '#FFB300', value: 1 },
-  gangue: { label: 'Нерудная матрица', color: '#9E9E9E', value: 2 },
-  talc: { label: 'Тальк', color: '#00695C', value: 3 },
-};
-
-export const MASK_VALUE_TO_ROLE: Record<number, Exclude<MineralRole, 'other'>> = {
-  1: 'sulfide',
-  2: 'gangue',
-  3: 'talc',
+export const MASK_CLASSES: Record<MaskClassKey, MaskClassMeta> = {
+  coarse: { label: 'Обычные срастания', color: '#2E7D32', value: 1 }, // зелёный
+  fine: { label: 'Тонкие срастания', color: '#C62828', value: 2 }, // красный
+  talc: { label: 'Тальк', color: '#1565C0', value: 3 }, // синий
+  matrix: { label: 'Нерудная матрица', color: '#9E9E9E', value: 4 }, // серый
 };
 
 export interface StatusMeta {
@@ -53,5 +51,3 @@ export const EXPERIMENT_STATUS_META: Record<ExperimentStatus, StatusMeta> = {
   completed: { label: 'Завершён', color: 'success' },
   reported: { label: 'Отчёт выгружен', color: 'primary' },
 };
-
-export const COARSE_GRAIN_UM = 70;

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import Box from '@mui/material/Box';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
@@ -8,10 +9,12 @@ import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { useNavigate } from 'react-router-dom';
 import { FrameThumbnail } from '../../components/FrameThumbnail';
 import { OreClassBadge } from '../../components/OreClassBadge';
 import { FrameStatusChip } from '../../components/StatusChip';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import type { Experiment, Frame } from '../../types/models';
 import { ORE_CLASS_META } from '../../theme/palette';
 import { retryFrame } from '../../services/mockMl/queueRunner';
@@ -19,10 +22,12 @@ import { retryFrame } from '../../services/mockMl/queueRunner';
 interface FrameFilmstripProps {
   experiment: Experiment;
   onSetReference: (frameId: string) => void;
+  onDeleteFrame: (frameId: string) => void;
 }
 
-export function FrameFilmstrip({ experiment, onSetReference }: FrameFilmstripProps) {
+export function FrameFilmstrip({ experiment, onSetReference, onDeleteFrame }: FrameFilmstripProps) {
   const navigate = useNavigate();
+  const [deleteTarget, setDeleteTarget] = useState<Frame | null>(null);
 
   return (
     <Stack direction="row" spacing={2} sx={{ overflowX: 'auto', pb: 1 }}>
@@ -64,6 +69,25 @@ export function FrameFilmstrip({ experiment, onSetReference }: FrameFilmstripPro
                   />
                 </Tooltip>
               )}
+              <Tooltip title="Удалить кадр">
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeleteTarget(frame);
+                  }}
+                  sx={{
+                    position: 'absolute',
+                    bottom: 4,
+                    right: 4,
+                    bgcolor: 'rgba(0,0,0,0.45)',
+                    color: '#fff',
+                    '&:hover': { bgcolor: 'rgba(198,40,40,0.85)' },
+                  }}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
             </Box>
             <Box sx={{
               p: 1
@@ -125,6 +149,18 @@ export function FrameFilmstrip({ experiment, onSetReference }: FrameFilmstripPro
           </Paper>
         );
       })}
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Удалить кадр?"
+        description={`Кадр «${deleteTarget?.name ?? ''}» и его маска будут удалены безвозвратно.`}
+        confirmLabel="Удалить"
+        danger
+        onConfirm={() => {
+          if (deleteTarget) onDeleteFrame(deleteTarget.id);
+          setDeleteTarget(null);
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </Stack>
   );
 }

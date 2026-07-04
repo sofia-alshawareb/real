@@ -1,6 +1,6 @@
 import Chip from '@mui/material/Chip';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import WarningIcon from '@mui/icons-material/Warning';
+import SettingsIcon from '@mui/icons-material/Settings';
 import LayersIcon from '@mui/icons-material/Layers';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutlineOutlined';
 import type { OreClass } from '../types/models';
@@ -8,7 +8,7 @@ import { ORE_CLASS_META } from '../theme/palette';
 
 const ICONS = {
   check_circle: CheckCircleIcon,
-  warning: WarningIcon,
+  settings: SettingsIcon,
   layers: LayersIcon,
 };
 

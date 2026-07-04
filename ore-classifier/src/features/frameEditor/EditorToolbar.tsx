@@ -12,18 +12,22 @@ import PanToolIcon from '@mui/icons-material/PanTool';
 import BrushIcon from '@mui/icons-material/Brush';
 import AutoFixOffIcon from '@mui/icons-material/AutoFixOff';
 import PentagonIcon from '@mui/icons-material/Pentagon';
+import GestureIcon from '@mui/icons-material/Gesture';
+import FormatColorFillIcon from '@mui/icons-material/FormatColorFill';
 import UndoIcon from '@mui/icons-material/Undo';
 import RedoIcon from '@mui/icons-material/Redo';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import CompareIcon from '@mui/icons-material/Compare';
-import type { EditorTool, MaskClassKey } from '../../stores/editorStore';
-import { MASK_CLASSES } from '../../theme/palette';
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
+import ImageIcon from '@mui/icons-material/Image';
+import LayersIcon from '@mui/icons-material/Layers';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import type { EditorTool } from '../../stores/editorStore';
+import { BRUSH_RADIUS_RANGE } from '../../stores/editorStore';
 
 interface EditorToolbarProps {
   tool: EditorTool;
   onToolChange: (tool: EditorTool) => void;
-  activeClass: MaskClassKey;
-  onActiveClassChange: (cls: MaskClassKey) => void;
   brushRadius: number;
   onBrushRadiusChange: (v: number) => void;
   overlayOpacity: number;
@@ -36,14 +40,15 @@ interface EditorToolbarProps {
   hasAutoMask: boolean;
   compareMode: boolean;
   onToggleCompare: () => void;
+  viewMode: 'overlay' | 'original' | 'mask';
+  onViewModeChange: (mode: 'overlay' | 'original' | 'mask') => void;
+  onClearMask: () => void;
   disabled?: boolean;
 }
 
 export function EditorToolbar({
   tool,
   onToolChange,
-  activeClass,
-  onActiveClassChange,
   brushRadius,
   onBrushRadiusChange,
   overlayOpacity,
@@ -56,10 +61,27 @@ export function EditorToolbar({
   hasAutoMask,
   compareMode,
   onToggleCompare,
+  viewMode,
+  onViewModeChange,
+  onClearMask,
   disabled,
 }: EditorToolbarProps) {
+  const brushPercent = Math.round((brushRadius / BRUSH_RADIUS_RANGE.max) * 100);
+
   return (
-    <Paper variant="outlined" sx={{ p: 1.5, width: 96, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+    <Paper
+      variant="outlined"
+      sx={{
+        p: 1.5,
+        width: 104,
+        maxHeight: '100%',
+        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 1.5,
+      }}
+    >
       <ToggleButtonGroup
         orientation="vertical"
         exclusive
@@ -88,65 +110,34 @@ export function EditorToolbar({
             <PentagonIcon fontSize="small" />
           </Tooltip>
         </ToggleButton>
+        <ToggleButton value="fill">
+          <Tooltip title="Заливка: клик закрашивает смежную область активным классом, Alt+клик — удаляет (G)" placement="right">
+            <FormatColorFillIcon fontSize="small" />
+          </Tooltip>
+        </ToggleButton>
+        <ToggleButton value="lasso">
+          <Tooltip title="Лассо: обвести область от руки и залить/удалить обведённое (L)" placement="right">
+            <GestureIcon fontSize="small" />
+          </Tooltip>
+        </ToggleButton>
       </ToggleButtonGroup>
       <Divider flexItem />
-      <Stack spacing={0.75} sx={{
-        alignItems: "center"
-      }}>
-        {(Object.keys(MASK_CLASSES) as MaskClassKey[]).map((key, idx) => (
-          <Tooltip key={key} title={`${MASK_CLASSES[key].label} (${idx + 1})`} placement="right">
-            <Box
-              onClick={() => onActiveClassChange(key)}
-              sx={{
-                width: 28,
-                height: 28,
-                borderRadius: '50%',
-                bgcolor: MASK_CLASSES[key].color,
-                cursor: 'pointer',
-                border: activeClass === key ? '3px solid #3B5B7C' : '2px solid #fff',
-                boxShadow: '0 0 0 1px rgba(0,0,0,0.2)',
-              }}
-            />
-          </Tooltip>
-        ))}
-      </Stack>
-      <Divider flexItem />
-      <Box
-        sx={{
-          width: "100%",
-          px: 0.5
-        }}>
-        <Typography
-          variant="caption"
-          align="center"
-          sx={{
-            color: "text.secondary",
-            display: "block"
-          }}>
-          Кисть
+      <Box sx={{ width: '100%', px: 0.5 }}>
+        <Typography variant="caption" align="center" sx={{ color: 'text.secondary', display: 'block' }}>
+          Кисть {brushPercent}%
         </Typography>
         <Slider
           size="small"
           orientation="vertical"
           value={brushRadius}
-          min={2}
-          max={128}
+          min={BRUSH_RADIUS_RANGE.min}
+          max={BRUSH_RADIUS_RANGE.max}
           onChange={(_, v) => onBrushRadiusChange(v as number)}
-          sx={{ height: 70, mx: 'auto', display: 'block' }}
+          sx={{ height: 64, mx: 'auto', display: 'block' }}
         />
       </Box>
-      <Box
-        sx={{
-          width: "100%",
-          px: 0.5
-        }}>
-        <Typography
-          variant="caption"
-          align="center"
-          sx={{
-            color: "text.secondary",
-            display: "block"
-          }}>
+      <Box sx={{ width: '100%', px: 0.5 }}>
+        <Typography variant="caption" align="center" sx={{ color: 'text.secondary', display: 'block' }}>
           Слои
         </Typography>
         <Slider
@@ -157,7 +148,7 @@ export function EditorToolbar({
           max={1}
           step={0.05}
           onChange={(_, v) => onOverlayOpacityChange(v as number)}
-          sx={{ height: 70, mx: 'auto', display: 'block' }}
+          sx={{ height: 64, mx: 'auto', display: 'block' }}
         />
       </Box>
       <Divider flexItem />
@@ -183,10 +174,41 @@ export function EditorToolbar({
             </IconButton>
           </span>
         </Tooltip>
+        <Tooltip title="Очистить маску" placement="right">
+          <span>
+            <IconButton size="small" onClick={onClearMask}>
+              <DeleteSweepIcon fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>
         <Tooltip title="Сравнить с авторазметкой" placement="right">
           <span>
             <IconButton size="small" color={compareMode ? 'primary' : 'default'} disabled={!hasAutoMask} onClick={onToggleCompare}>
               <CompareIcon fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>
+      </Stack>
+      <Divider flexItem />
+      <Stack spacing={0.5}>
+        <Tooltip title="Только исходное изображение" placement="right">
+          <span>
+            <IconButton size="small" color={viewMode === 'original' ? 'primary' : 'default'} onClick={() => onViewModeChange('original')}>
+              <ImageIcon fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>
+        <Tooltip title="Изображение + маска (обычный режим)" placement="right">
+          <span>
+            <IconButton size="small" color={viewMode === 'overlay' ? 'primary' : 'default'} onClick={() => onViewModeChange('overlay')}>
+              <VisibilityIcon fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>
+        <Tooltip title="Только маска" placement="right">
+          <span>
+            <IconButton size="small" color={viewMode === 'mask' ? 'primary' : 'default'} onClick={() => onViewModeChange('mask')}>
+              <LayersIcon fontSize="small" />
             </IconButton>
           </span>
         </Tooltip>

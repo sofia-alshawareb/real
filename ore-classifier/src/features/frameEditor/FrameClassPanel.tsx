@@ -8,6 +8,7 @@ import MenuItem from '@mui/material/MenuItem';
 import Divider from '@mui/material/Divider';
 import LinearProgress from '@mui/material/LinearProgress';
 import Box from '@mui/material/Box';
+import Alert from '@mui/material/Alert';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -15,40 +16,59 @@ import DialogActions from '@mui/material/DialogActions';
 import TextField from '@mui/material/TextField';
 import AddIcon from '@mui/icons-material/Add';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import VerifiedIcon from '@mui/icons-material/Verified';
 import EditIcon from '@mui/icons-material/Edit';
 import { OreClassBadge } from '../../components/OreClassBadge';
 import { ORE_CLASS_META } from '../../theme/palette';
-import type { Frame, OreClass, MineralRole } from '../../types/models';
+import { classifyFrame } from '../../services/rulesEngine';
+import type { Frame, FrameMetrics, OreClass, MineralRole } from '../../types/models';
 import { formatPercent } from '../../utils/format';
 import { useDepositsStore } from '../../stores/depositsStore';
 
 interface FrameClassPanelProps {
   frame: Frame;
   depositId: string;
+  talcThreshold: number;
+  liveMetrics?: FrameMetrics;
   onConfirm: () => void;
   onManualOverride: (oreClass: OreClass | undefined) => void;
 }
 
-export function FrameClassPanel({ frame, depositId, onConfirm, onManualOverride }: FrameClassPanelProps) {
+export function FrameClassPanel({ frame, depositId, talcThreshold, liveMetrics, onConfirm, onManualOverride }: FrameClassPanelProps) {
   const [editing, setEditing] = useState(false);
   const [addMineralOpen, setAddMineralOpen] = useState(false);
   const addMineral = useDepositsStore((s) => s.addMineral);
 
-  const effectiveClass = frame.manualClassOverride ?? frame.frameClass;
+  const isReviewed = frame.status === 'reviewed';
+  const displayMetrics = liveMetrics ?? frame.metrics;
+
+  const liveClassification = displayMetrics ? classifyFrame(displayMetrics, talcThreshold) : undefined;
+  const expectedClass = liveClassification?.oreClass;
+  const conflictsWithMetrics = Boolean(
+    frame.manualClassOverride && expectedClass && frame.manualClassOverride !== expectedClass,
+  );
+  // Без ручной правки — показываем класс, пересчитанный по текущей (в т.ч. несохранённой) разметке.
+  const effectiveClass = frame.manualClassOverride ?? (liveMetrics ? expectedClass : frame.frameClass);
+  const displayReason = frame.manualClassOverride ? frame.classReason : (liveClassification?.reason ?? frame.classReason);
 
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
       <Typography variant="subtitle2" gutterBottom>
         Классификация кадра
       </Typography>
-      {frame.metrics ? (
+      {displayMetrics ? (
         <Stack spacing={1} sx={{
           mb: 2
         }}>
-          <MetricRow label="Доля талька" value={frame.metrics.talcFraction} />
-          <MetricRow label="Доля сульфидов" value={frame.metrics.sulfideFraction} />
-          <MetricRow label="Крупные срастания" value={frame.metrics.coarseFraction} />
-          <MetricRow label="Тонкие срастания" value={frame.metrics.fineFraction} />
+          {liveMetrics && (
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              Предварительно, по текущей (несохранённой) разметке
+            </Typography>
+          )}
+          <MetricRow label="Доля талька" value={displayMetrics.talcFraction} />
+          <MetricRow label="Доля сульфидов" value={displayMetrics.sulfideFraction} />
+          <MetricRow label="Обычные срастания" value={displayMetrics.coarseFraction} />
+          <MetricRow label="Тонкие срастания" value={displayMetrics.fineFraction} />
         </Stack>
       ) : (
         <Typography
@@ -76,11 +96,11 @@ export function FrameClassPanel({ frame, depositId, onConfirm, onManualOverride 
               <EditIcon fontSize="inherit" /> Класс скорректирован вручную
             </Typography>
           )}
-          {frame.classReason && (
+          {displayReason && (
             <Typography variant="body2" sx={{
               color: "text.secondary"
             }}>
-              {frame.classReason}
+              {displayReason}
             </Typography>
           )}
           {frame.confidence !== undefined && (
@@ -108,25 +128,37 @@ export function FrameClassPanel({ frame, depositId, onConfirm, onManualOverride 
           ))}
         </Select>
       )}
+      {conflictsWithMetrics && expectedClass && (
+        <Alert severity="warning" sx={{ mt: 1.5 }}>
+          Выбранный класс «{ORE_CLASS_META[frame.manualClassOverride!].label}» не соответствует расчётным метрикам
+          (ожидается «{ORE_CLASS_META[expectedClass].label}»). Правка всё равно сохранена — проверьте обоснование.
+        </Alert>
+      )}
       <Stack
         direction="row"
         spacing={1}
         sx={{
-          mt: 2,
-          flexWrap: "wrap"
+          mt: 2
         }}>
-        <Button size="small" variant="contained" startIcon={<CheckCircleIcon />} onClick={onConfirm} disabled={!frame.frameClass && !frame.manualClassOverride}>
-          Подтвердить
+        <Button
+          fullWidth
+          variant={isReviewed ? 'outlined' : 'contained'}
+          color={isReviewed ? 'success' : 'primary'}
+          startIcon={isReviewed ? <VerifiedIcon /> : <CheckCircleIcon />}
+          onClick={onConfirm}
+          disabled={isReviewed || !effectiveClass}
+        >
+          {isReviewed ? 'Класс утверждён' : 'Утвердить класс (проверено)'}
         </Button>
-        <Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => setEditing((v) => !v)}>
+        <Button fullWidth variant="outlined" startIcon={<EditIcon />} onClick={() => setEditing((v) => !v)}>
           Исправить класс
         </Button>
-        {frame.manualClassOverride && (
-          <Button size="small" color="inherit" onClick={() => onManualOverride(undefined)}>
-            Сбросить правку
-          </Button>
-        )}
       </Stack>
+      {frame.manualClassOverride && (
+        <Button size="small" color="inherit" sx={{ mt: 1 }} onClick={() => onManualOverride(undefined)}>
+          Сбросить правку
+        </Button>
+      )}
       <Divider sx={{ my: 2 }} />
       <Button size="small" startIcon={<AddIcon />} onClick={() => setAddMineralOpen(true)}>
         Минерал в профиль месторождения

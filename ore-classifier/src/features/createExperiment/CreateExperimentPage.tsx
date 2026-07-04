@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -47,7 +47,8 @@ const DEFAULT_PIXEL_SIZE_UM = 0.5;
 
 export function CreateExperimentPage() {
   const navigate = useNavigate();
-  const deposits = useDepositsStore((s) => s.deposits.filter((d) => !d.archived));
+  const allDeposits = useDepositsStore((s) => s.deposits);
+  const deposits = useMemo(() => allDeposits.filter((d) => !d.archived), [allDeposits]);
   const authorName = useSettingsStore((s) => s.authorName) || 'Без имени';
   const createExperiment = useExperimentsStore((s) => s.createExperiment);
   const addFrames = useExperimentsStore((s) => s.addFrames);

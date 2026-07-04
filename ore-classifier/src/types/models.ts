@@ -30,6 +30,27 @@ export interface Mineral {
   note?: string;
 }
 
+export interface DepositReserves {
+  /** Доказанные и вероятные запасы (по Кодексу JORC), напр. "622,8 млн т". */
+  provenProbable?: string;
+  /** Оцененные и выявленные ресурсы (по Кодексу JORC). */
+  measuredIndicated?: string;
+  /** Балансовые запасы. */
+  balance?: string;
+}
+
+export interface MetalGrades {
+  /** Среднее содержание никеля, напр. "2,22%". */
+  nickel?: string;
+  copper?: string;
+  /** Металлы платиновой группы, напр. "10,27 г/т". */
+  mpg?: string;
+  gold?: string;
+  silver?: string;
+  iron?: string;
+  cobalt?: string;
+}
+
 export interface Deposit {
   id: string;
   name: string;
@@ -37,6 +58,14 @@ export interface Deposit {
   talcThreshold: number; // доля, напр. 0.10
   minerals: Mineral[];
   notes?: string;
+  /** Рудный узел/группа месторождений (напр. "Талнахский рудный узел"). */
+  oreCluster?: string;
+  /** Регион/страна расположения. */
+  region?: string;
+  /** Типы руд, напр. ["богатые", "медистые", "вкрапленные"]. */
+  oreTypes?: string[];
+  reserves?: DepositReserves;
+  metalGrades?: MetalGrades;
   archived: boolean;
   updatedBy: string;
   updatedAt: number;
@@ -44,8 +73,9 @@ export interface Deposit {
 
 export interface FrameMetrics {
   talcFraction: number;
+  /** Общая доля сульфидных срастаний (обычные + тонкие). */
   sulfideFraction: number;
-  gangueFraction: number;
+  matrixFraction: number;
   coarseFraction: number;
   fineFraction: number;
   classifiedShare: number;
@@ -107,6 +137,8 @@ export interface ReportDraft {
   recommendations: string;
   includedFrameIds: string[];
   snapshotAt: number;
+  /** Отредактированные заметки по минералам месторождения, локальные для черновика (id минерала -> текст). */
+  mineralNotes?: Record<string, string>;
 }
 
 export interface MlQueueItem {
