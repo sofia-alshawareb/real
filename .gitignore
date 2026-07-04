@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# ML outputs (regenerable)
+outputs/
+
+# Large model weights and vendored repos
+data/models/dinov2/
+data/models/checkpoints/*.pth
+
+# Raw datasets (keep local; download separately)
+data/raw/
+data/dataset/
+data/classification/train/**/*
+data/classification/val/**/*
+!data/classification/**/.gitkeep
+task3-data/
+task3.zip
+photos-part1/
+Задача 3.*/
+
+# Frontend
+ore-classifier/node_modules/
+ore-classifier/dist/
