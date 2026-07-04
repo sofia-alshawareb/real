@@ -1,0 +1,24 @@
+dino:
+  repo: data/models/dinov2
+  weights: data/models/checkpoints/dinov2_vits14_reg4_pretrain.pth
+  num_blocks: 12
+  inference_blocks: [1, 11]
+  save_activations: false
+  device: ""
+segmentation:
+  region_map: dino
+  block_index: 1
+  region_overlap: 0.6
+  close_radius: 3
+  random_state: 0
+  max_samples: 300000
+  preprocess: false
+  denoise: true
+  illum_sigma: 64.0
+storage:
+  root: data/artifacts
+  images_subdir: images
+api:
+  host: 0.0.0.0
+  port: 8000
+schema_version: "1.0"

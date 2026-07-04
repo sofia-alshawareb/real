@@ -44,7 +44,6 @@ import math
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
-from multiprocessing import get_context
 from pathlib import Path
 
 import matplotlib
@@ -299,6 +298,15 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Torch device for DINO (default: cuda if available else cpu).",
     )
+    parser.add_argument(
+        "--peak-patch-similarity-only",
+        action="store_true",
+        help=(
+            "Skip segmentation/GMM. Run DINO on the chosen block, find the "
+            "highest-activation patch, and save only the cosine-similarity "
+            "heat map vs that patch."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -337,6 +345,8 @@ def run_output_stem(stem: str, region_map: str, block_index: int) -> str:
 
 
 def needs_dino_inference(args: argparse.Namespace) -> bool:
+    if args.peak_patch_similarity_only:
+        return True
     if args.region_map == REGION_MAP_DINO:
         return True
     return bool(args.log_intermediates and args.log_probes)
@@ -471,6 +481,64 @@ def upsample_patch_map(patch_map: np.ndarray, target_hw: tuple[int, int]) -> np.
     tensor = torch.from_numpy(patch_map.astype(np.float32)).unsqueeze(0).unsqueeze(0)
     up = F.interpolate(tensor, size=target_hw, mode="bilinear", align_corners=False)
     return up.squeeze().numpy().astype(np.float32)
+
+
+def patch_l2_activation_grid(feats: torch.Tensor) -> np.ndarray:
+    """Per-patch L2 norm on the token grid (hp, wp), not min-max normalized."""
+    return torch.linalg.vector_norm(feats, dim=0).numpy().astype(np.float32)
+
+
+def patch_similarity_to_peak(
+    feats: torch.Tensor,
+    target_hw: tuple[int, int],
+) -> tuple[np.ndarray, tuple[int, int], np.ndarray]:
+    """Cosine similarity of every patch feature to the peak-activation patch.
+
+    DINO tokens are L2-normalized, so dot product equals cosine similarity.
+    Returns (full-res map in [0, 1], peak (row, col), patch-grid similarity).
+    """
+    c, hp, wp = feats.shape
+    vectors = feats.reshape(c, -1).T  # (n_patches, C), already unit-norm
+    act = torch.linalg.vector_norm(vectors, dim=1)
+    peak_idx = int(torch.argmax(act).item())
+    peak_row, peak_col = peak_idx // wp, peak_idx % wp
+    ref = vectors[peak_idx]
+    sim = (vectors @ ref).reshape(hp, wp)
+    sim_np = sim.numpy().astype(np.float32)
+    sim_up = upsample_patch_map(normalize01(sim_np), target_hw)
+    return sim_up, (peak_row, peak_col), sim_np
+
+
+def activation_colormap_heatmap(
+    activation: np.ndarray,
+    colormap: str = "inferno",
+) -> np.ndarray:
+    cmap = plt.get_cmap(colormap)
+    colored = cmap(np.clip(activation, 0.0, 1.0))[:, :, :3]
+    return (colored * 255.0).astype(np.uint8)
+
+
+def save_peak_patch_similarity_map(
+    out_path: Path,
+    patch_feats: torch.Tensor,
+    target_hw: tuple[int, int],
+    *,
+    colormap: str = "inferno",
+) -> dict[str, object]:
+    """Save a single heat map: cosine similarity to the peak-activation patch."""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    sim_up, peak_rc, sim_grid = patch_similarity_to_peak(patch_feats, target_hw)
+    heat = activation_colormap_heatmap(sim_up, colormap)
+    Image.fromarray(heat).save(out_path)
+    act_grid = patch_l2_activation_grid(patch_feats)
+    hp, wp = patch_feats.shape[1], patch_feats.shape[2]
+    return {
+        "output": str(out_path),
+        "peak_patch_row_col": [int(peak_rc[0]), int(peak_rc[1])],
+        "peak_patch_activation": float(act_grid[peak_rc]),
+        "patch_grid_shape": [int(hp), int(wp)],
+        "similarity_grid_stats": map_stats(sim_grid),
+    }
 
 
 @torch.inference_mode()
@@ -1189,6 +1257,48 @@ def save_histogram_with_gmm(
     plt.close(fig)
 
 
+def run_peak_patch_similarity_only(
+    input_path: Path,
+    out_dir: Path,
+    args: argparse.Namespace,
+    *,
+    device: torch.device,
+    dino_model: nn.Module | None = None,
+    dino_weights: str = "",
+) -> Path:
+    """Fast path: DINO inference + peak-patch similarity heat map only."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = input_path.stem
+    block_index = int(args.block_index)
+    block_tag = dino_block_tag(block_index)
+    out_path = out_dir / f"{stem}_dino_{block_tag}_peak_patch_similarity.png"
+
+    if args.skip_existing and out_path.exists():
+        print(f"Skip existing: {out_path}")
+        return out_path
+
+    t0 = time.perf_counter()
+    print(f"Loading image: {input_path}")
+    rgb = load_rgb(input_path)
+    print(f"Running DINO block {block_index} ({rgb.shape[1]}×{rgb.shape[0]}) on {device}…")
+    patch_feats, target_hw = dino_block_patch_features(
+        rgb,
+        device=device,
+        block_index=block_index,
+        num_blocks=int(args.num_blocks),
+        model=dino_model,
+        repo_dir=Path(args.dino_repo),
+        weights=dino_weights,
+    )
+    print("Computing peak-patch similarity map…")
+    meta = save_peak_patch_similarity_map(out_path, patch_feats, target_hw)
+    elapsed = time.perf_counter() - t0
+    print(f"Peak patch: row={meta['peak_patch_row_col'][0]}, col={meta['peak_patch_row_col'][1]}")
+    print(f"Saved: {out_path}")
+    print(f"Wall time: {elapsed:.3f} s")
+    return out_path
+
+
 def run_one(
     input_path: Path,
     out_dir: Path,
@@ -1250,19 +1360,22 @@ def run_one(
             weights=dino_weights,
         )
 
-    # Parallel: 4-GMM on region map + 2-GMM FG on intensity.
-    ctx = get_context("fork")
-    with ctx.Pool(processes=min(2, workers)) as pool:
-        async_gmm4 = pool.apply_async(
+    # Parallel: 4-GMM on region map + 2-GMM FG on intensity (no fork — CUDA-safe).
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        fut_gmm4 = pool.submit(
             _fit_region_gmm,
-            (region_map_values, args.max_samples, args.random_state),
+            region_map_values,
+            args.max_samples,
+            args.random_state,
         )
-        async_fg = pool.apply_async(
+        fut_fg = pool.submit(
             _fit_fg_gmm,
-            (intensity, args.max_samples, args.random_state),
+            intensity,
+            args.max_samples,
+            args.random_state,
         )
-        means, variances, weights = async_gmm4.get()
-        fg_t, fg_means, fg_vars, fg_weights = async_fg.get()
+        means, variances, weights = fut_gmm4.result()
+        fg_t, fg_means, fg_vars, fg_weights = fut_fg.result()
 
     thresholds = thresholds_from_adjacent_intersections(means, variances, weights)
     region_labels_raw = segment_by_thresholds(region_map_values, thresholds)
@@ -1548,39 +1661,69 @@ def run_one(
 
 def main() -> None:
     args = parse_args()
-    if needs_dino_inference(args):
+    if args.peak_patch_similarity_only:
+        validate_dino_block_args(int(args.num_blocks), int(args.block_index))
+    elif needs_dino_inference(args):
         validate_dino_block_args(int(args.num_blocks), int(args.block_index))
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     dino_weights = resolve_dino_weights(args.dino_weights)
     output_root = Path(args.output_dir)
     output_root.mkdir(parents=True, exist_ok=True)
 
-    if args.source:
-        source_root = Path(args.source)
-        if not source_root.is_dir():
-            raise FileNotFoundError(f"Source folder not found: {source_root}")
-        image_paths = discover_images(source_root)
-        if not image_paths:
-            raise FileNotFoundError(f"No images under {source_root}")
+    dino_model = None
+    if needs_dino_inference(args):
         print(f"Device: {device}")
-        print(f"Region map: {args.region_map}")
-        if args.region_map == REGION_MAP_DINO:
-            print(f"DINO: block {args.block_index} / {args.num_blocks} blocks")
-        print(f"Source: {source_root}")
-        print(f"Output: {output_root}")
-        print(f"Images: {len(image_paths)}")
-        print(f"Log intermediates: {args.log_intermediates}")
+        print(f"Loading DINO ({args.num_blocks} blocks)…")
+        dino_model = load_dinov2_truncated(
+            Path(args.dino_repo),
+            dino_weights,
+            device,
+            int(args.num_blocks),
+        )
 
-        dino_model = None
-        if needs_dino_inference(args):
-            dino_model = load_dinov2_truncated(
-                Path(args.dino_repo),
-                dino_weights,
-                device,
-                int(args.num_blocks),
+    try:
+        if args.peak_patch_similarity_only:
+            if args.source:
+                source_root = Path(args.source)
+                image_paths = discover_images(source_root)
+                for image_path in image_paths:
+                    rel = image_path.relative_to(source_root)
+                    run_peak_patch_similarity_only(
+                        image_path,
+                        output_root / rel.parent,
+                        args,
+                        device=device,
+                        dino_model=dino_model,
+                        dino_weights=dino_weights,
+                    )
+                return
+            run_peak_patch_similarity_only(
+                Path(args.input),
+                output_root,
+                args,
+                device=device,
+                dino_model=dino_model,
+                dino_weights=dino_weights,
             )
-        failed: list[tuple[str, str]] = []
-        try:
+            return
+
+        if args.source:
+            source_root = Path(args.source)
+            if not source_root.is_dir():
+                raise FileNotFoundError(f"Source folder not found: {source_root}")
+            image_paths = discover_images(source_root)
+            if not image_paths:
+                raise FileNotFoundError(f"No images under {source_root}")
+            print(f"Device: {device}")
+            print(f"Region map: {args.region_map}")
+            if args.region_map == REGION_MAP_DINO:
+                print(f"DINO: block {args.block_index} / {args.num_blocks} blocks")
+            print(f"Source: {source_root}")
+            print(f"Output: {output_root}")
+            print(f"Images: {len(image_paths)}")
+            print(f"Log intermediates: {args.log_intermediates}")
+
+            failed: list[tuple[str, str]] = []
             for image_path in image_paths:
                 rel = image_path.relative_to(source_root)
                 out_dir = output_root / rel.parent
@@ -1596,27 +1739,27 @@ def main() -> None:
                 except Exception as exc:
                     failed.append((str(image_path), str(exc)))
                     print(f"FAILED {image_path}: {exc}")
-        finally:
-            if dino_model is not None:
-                del dino_model
-                gc.collect()
-                if device.type == "cuda":
-                    torch.cuda.empty_cache()
 
-        print(f"Done. Failed: {len(failed)} / {len(image_paths)}")
-        if failed:
-            for path, err in failed[:10]:
-                print(f"  {path}: {err}")
-        return
+            print(f"Done. Failed: {len(failed)} / {len(image_paths)}")
+            if failed:
+                for path, err in failed[:10]:
+                    print(f"  {path}: {err}")
+            return
 
-    run_one(
-        Path(args.input),
-        output_root,
-        args,
-        device=device,
-        dino_model=None,
-        dino_weights=dino_weights,
-    )
+        run_one(
+            Path(args.input),
+            output_root,
+            args,
+            device=device,
+            dino_model=dino_model,
+            dino_weights=dino_weights,
+        )
+    finally:
+        if dino_model is not None:
+            del dino_model
+            gc.collect()
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":
