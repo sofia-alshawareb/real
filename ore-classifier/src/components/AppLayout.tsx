@@ -25,7 +25,7 @@ import MoreVertIcon from '@mui/icons-material/MoreVert';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { useSettingsStore } from '../stores/settingsStore';
-import { resetDemoData } from '../services/seed/seedData';
+import { clearAppData } from '../services/appData';
 import { ConfirmDialog } from './ConfirmDialog';
 import { notify } from '../utils/toast';
 
@@ -50,8 +50,8 @@ export function AppLayout() {
   const handleReset = async () => {
     setResetting(true);
     try {
-      await resetDemoData();
-      notify('Демо-данные сброшены и пересозданы', 'success');
+      await clearAppData();
+      notify('Все локальные данные удалены', 'success');
     } finally {
       setResetting(false);
       setResetOpen(false);
@@ -125,7 +125,7 @@ export function AppLayout() {
               <ListItemIcon>
                 <RestartAltIcon fontSize="small" />
               </ListItemIcon>
-              Сбросить демо-данные
+              Очистить все данные
             </MenuItem>
           </Menu>
         </Toolbar>
@@ -174,9 +174,9 @@ export function AppLayout() {
       </Box>
       <ConfirmDialog
         open={resetOpen}
-        title="Сбросить демо-данные?"
-        description="Все эксперименты, месторождения и локальные изменения будут удалены и пересозданы заново. Действие необратимо."
-        confirmLabel={resetting ? 'Сброс...' : 'Сбросить'}
+        title="Очистить все данные?"
+        description="Все эксперименты, месторождения, маски и очередь ML будут удалены из браузера. Действие необратимо."
+        confirmLabel={resetting ? 'Удаление...' : 'Удалить'}
         danger
         onConfirm={handleReset}
         onCancel={() => setResetOpen(false)}

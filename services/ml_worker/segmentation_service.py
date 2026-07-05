@@ -31,7 +31,16 @@ class SegmentationService:
             region_overlap=self.config.region_overlap,
             block_index=self.config.block_index,
             fg_dilate_radius=self.config.fg_dilate_radius,
+            talc_refine_fg_dilate_radius=self.config.talc_refine_fg_dilate_radius,
+            talc_gmm_fg_buffer_radius=self.config.talc_gmm_fg_buffer_radius,
+            talc_gmm_gate_erode=self.config.talc_gmm_gate_erode,
             talc_black_max=self.config.talc_black_max,
+            talc_min_cosine_margin=self.config.talc_min_cosine_margin,
+            talc_contour_dilate=self.config.talc_contour_dilate,
+            talc_block01_overlap=self.config.talc_block01_overlap,
+            talc_gmm_threshold_high_bias=self.config.talc_gmm_threshold_high_bias,
+            talc_margin_relax=self.config.talc_margin_relax,
+            talc_refine_mode=self.config.talc_refine_mode,
         )
 
     def run(
@@ -44,18 +53,17 @@ class SegmentationService:
     ) -> SegmentationResult:
         mode = self.config.mode
         block_features = block01_features if block01_features is not None else block11_features
-        if mode == SEGMENTATION_MODE_EMBEDDING and block_features is None:
-            raise ValueError("block01_features required for embedding segmentation mode")
-        if mode == SEGMENTATION_MODE_HYBRID and (
-            block01_activation is None or block_features is None
-        ):
+        if mode == SEGMENTATION_MODE_EMBEDDING and block11_features is None:
+            raise ValueError("block11_features required for embedding segmentation mode")
+        if mode == SEGMENTATION_MODE_HYBRID and block01_activation is None:
             raise ValueError(
-                "block01_activation and block01_features required for hybrid segmentation mode"
+                "block01_activation required for hybrid segmentation mode"
             )
         return segment_image(
             rgb,
             calib,
             self._seg_cfg(),
             block01_activation=block01_activation,
-            block01_features=block_features,
+            block01_features=block01_features,
+            block11_features=block11_features,
         )

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract DINO block-1 patch features for calibration images under data/calib/img*."""
+"""Extract DINO block-1 (coarse/fine) and block-11 (talc embedding) features for calib img* folders."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ if str(_ROOT) not in sys.path:
 
 import torch
 
-from ml.lib.constants import DEFAULT_DINO_REPO, DEFAULT_DINO_WEIGHTS, FALLBACK_DINO_WEIGHTS
+from ml.lib.constants import COARSE_FINE_DINO_BLOCK, DEFAULT_DINO_REPO, DEFAULT_DINO_WEIGHTS, FALLBACK_DINO_WEIGHTS, TALC_EMBEDDING_BLOCK
 from ml.lib.dino.inference import extract_multi_block_features
 from ml.lib.dino.model import resolve_dino_weights
 
@@ -26,7 +26,7 @@ def _load_rgb(path: Path) -> np.ndarray:
     return np.asarray(Image.open(path).convert("RGB"))
 
 
-def extract_block01_for_dir(
+def extract_blocks_for_dir(
     img_dir: Path,
     *,
     device: torch.device,
@@ -36,34 +36,44 @@ def extract_block01_for_dir(
     overwrite: bool,
 ) -> dict:
     norm_path = img_dir / "normalized.png"
-    out_path = img_dir / "block01_features.npy"
+    out01 = img_dir / "block01_features.npy"
+    act01 = img_dir / "block01_activation.npy"
+    out11 = img_dir / "block11_features.npy"
     if not norm_path.exists():
         return {"dir": img_dir.name, "skipped": True, "reason": "missing normalized.png"}
-    if out_path.exists() and not overwrite:
-        return {"dir": img_dir.name, "skipped": True, "reason": "block01_features.npy exists"}
+    if out01.exists() and act01.exists() and out11.exists() and not overwrite:
+        return {"dir": img_dir.name, "skipped": True, "reason": "block01/11 artifacts exist"}
 
     rgb = _load_rgb(norm_path)
     result = extract_multi_block_features(
         rgb,
         device=device,
-        block_indices=[1],
+        block_indices=[COARSE_FINE_DINO_BLOCK, TALC_EMBEDDING_BLOCK],
         num_blocks=num_blocks,
         repo_dir=repo_dir,
         weights=weights,
     )
-    feats = result.features(1).numpy().astype(np.float32)
-    np.save(out_path, feats)
+    feats01 = result.features(COARSE_FINE_DINO_BLOCK).numpy().astype(np.float32)
+    activation = result.activation(COARSE_FINE_DINO_BLOCK).astype(np.float32)
+    feats11 = result.features(TALC_EMBEDDING_BLOCK).numpy().astype(np.float32)
+    np.save(out01, feats01)
+    np.save(act01, activation)
+    np.save(out11, feats11)
     return {
         "dir": img_dir.name,
-        "saved": str(out_path),
-        "shape": list(feats.shape),
+        "saved_block01": str(out01),
+        "saved_block11": str(out11),
+        "activation_saved": str(act01),
+        "shape_block01": list(feats01.shape),
+        "shape_block11": list(feats11.shape),
+        "activation_shape": list(activation.shape),
         "native_hw": [int(rgb.shape[0]), int(rgb.shape[1])],
     }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Extract block-1 DINO features for data/calib/img* calibration folders"
+        description="Extract block-1 and block-11 DINO features for data/calib/img* folders"
     )
     parser.add_argument("--calib-root", type=Path, default=_ROOT / "data/calib")
     parser.add_argument("--repo", type=Path, default=DEFAULT_DINO_REPO)
@@ -90,7 +100,7 @@ def main() -> None:
     report = []
     for img_dir in image_dirs:
         report.append(
-            extract_block01_for_dir(
+            extract_blocks_for_dir(
                 img_dir,
                 device=device,
                 repo_dir=args.repo,

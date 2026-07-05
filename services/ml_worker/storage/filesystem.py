@@ -220,7 +220,7 @@ class FilesystemArtifactStore:
         dino_dir = self._dino_dir(image_id)
         return (dino_dir / "block01_features.npy").exists() and (
             dino_dir / "block01_activation.npy"
-        ).exists()
+        ).exists() and (dino_dir / "block11_features.npy").exists()
 
     def load_labels(self, image_id: str) -> np.ndarray:
         path = self._seg_dir(image_id) / "labels.npy"

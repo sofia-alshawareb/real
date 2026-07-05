@@ -11,6 +11,10 @@ export interface ClassificationResult {
   reason: string;
 }
 
+function fmtPixels(n: number): string {
+  return n.toLocaleString('ru-RU');
+}
+
 export function classifyFrame(m: FrameMetrics, talcThreshold: number): ClassificationResult {
   if (m.talcFraction > talcThreshold) {
     return {
@@ -18,15 +22,29 @@ export function classifyFrame(m: FrameMetrics, talcThreshold: number): Classific
       reason: `Доля талька ${pct(m.talcFraction)} превышает порог ${pct(talcThreshold)} — оталькованная руда`,
     };
   }
-  if (m.coarseFraction > m.fineFraction) {
+  const coarsePx = m.coarsePixels;
+  const finePx = m.finePixels;
+  const fineDominates =
+    coarsePx != null && finePx != null ? finePx > coarsePx : m.fineFraction > m.coarseFraction;
+  if (fineDominates) {
+    const coarseLabel = coarsePx != null ? fmtPixels(coarsePx) : pct(m.coarseFraction);
+    const fineLabel = finePx != null ? fmtPixels(finePx) : pct(m.fineFraction);
     return {
-      oreClass: 'routine',
-      reason: `Доля талька ${pct(m.talcFraction)} ≤ порога, преобладают обычные срастания (${pct(m.coarseFraction)} против ${pct(m.fineFraction)}) — рядовая руда`,
+      oreClass: 'hard',
+      reason:
+        coarsePx != null && finePx != null
+          ? `Доля талька ${pct(m.talcFraction)} ≤ порога, площадь тонких срастаний (${fineLabel} px) больше обычных (${coarseLabel} px) — труднообогатимая руда`
+          : `Доля талька ${pct(m.talcFraction)} ≤ порога, преобладают тонкие срастания (${fineLabel} против ${coarseLabel}) — труднообогатимая руда`,
     };
   }
+  const coarseLabel = coarsePx != null ? fmtPixels(coarsePx) : pct(m.coarseFraction);
+  const fineLabel = finePx != null ? fmtPixels(finePx) : pct(m.fineFraction);
   return {
-    oreClass: 'hard',
-    reason: `Доля талька ${pct(m.talcFraction)} ≤ порога, преобладают тонкие срастания (${pct(m.fineFraction)} против ${pct(m.coarseFraction)}) — труднообогатимая руда`,
+    oreClass: 'routine',
+    reason:
+      coarsePx != null && finePx != null
+        ? `Доля талька ${pct(m.talcFraction)} ≤ порога, площадь обычных срастаний (${coarseLabel} px) не меньше тонких (${fineLabel} px) — рядовая руда`
+        : `Доля талька ${pct(m.talcFraction)} ≤ порога, преобладают обычные срастания (${coarseLabel} против ${fineLabel}) — рядовая руда`,
   };
 }
 

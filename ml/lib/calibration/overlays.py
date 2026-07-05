@@ -11,7 +11,7 @@ from ml.lib.calibration.filters import apply_class_filter, rgb_to_gray
 from ml.lib.constants import CLASS_COLORS, CLS_TALC
 
 FILTERED_TALC_OVERLAY_NAME = "filtered_talc_overlay.png"
-# Amber highlight for hand-drawn talc pixels removed by the 2-GMM dark filter.
+# Amber highlight for hand-drawn talc pixels removed by the black threshold filter.
 TALC_REJECTED_OVERLAY_COLOR = (255, 193, 7)
 
 
@@ -50,7 +50,7 @@ def save_filtered_talc_overlay(
     max_samples: int = 300_000,
     random_state: int = 0,
 ) -> dict | None:
-    """Run talc 2-GMM filter and save overlay PNG. Returns filter meta or None if no talc mask."""
+    """Run talc black-threshold filter and save overlay PNG. Returns filter meta or None if no talc mask."""
     raw = class_masks.get(CLS_TALC)
     if raw is None or not np.any(raw):
         return None
@@ -60,8 +60,7 @@ def save_filtered_talc_overlay(
         CLS_TALC,
         gray,
         raw,
-        max_samples=max_samples,
-        random_state=random_state,
+        rgb=rgb,
     )
     overlay = render_filtered_talc_overlay(rgb, raw, filtered)
     dest_path.parent.mkdir(parents=True, exist_ok=True)

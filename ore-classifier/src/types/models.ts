@@ -78,6 +78,13 @@ export interface FrameMetrics {
   matrixFraction: number;
   coarseFraction: number;
   fineFraction: number;
+  /** Число пикселей маски класса «обычные срастания». */
+  coarsePixels?: number;
+  /** Число пикселей маски класса «тонкие срастания». */
+  finePixels?: number;
+  /** Пиксели матрицы: всё, что не тальк и не срастания (фон + класс матрицы). */
+  matrixPixels?: number;
+  /** Доля пикселей с любой разметкой (классы 1–4). */
   classifiedShare: number;
 }
 

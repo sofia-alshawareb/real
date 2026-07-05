@@ -22,7 +22,7 @@ import { OreClassBadge } from '../../components/OreClassBadge';
 import { ORE_CLASS_META } from '../../theme/palette';
 import { classifyFrame } from '../../services/rulesEngine';
 import type { Frame, FrameMetrics, OreClass, MineralRole } from '../../types/models';
-import { formatPercent } from '../../utils/format';
+import { formatPercent, formatPixels } from '../../utils/format';
 import { useDepositsStore } from '../../stores/depositsStore';
 
 interface FrameClassPanelProps {
@@ -65,10 +65,16 @@ export function FrameClassPanel({ frame, depositId, talcThreshold, liveMetrics, 
               Предварительно, по текущей (несохранённой) разметке
             </Typography>
           )}
+          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 0.5 }}>
+            Доли — от всей площади кадра (сумма = 100%)
+          </Typography>
           <MetricRow label="Доля талька" value={displayMetrics.talcFraction} />
-          <MetricRow label="Доля сульфидов" value={displayMetrics.sulfideFraction} />
-          <MetricRow label="Обычные срастания" value={displayMetrics.coarseFraction} />
-          <MetricRow label="Тонкие срастания" value={displayMetrics.fineFraction} />
+          <MetricRow label="Обычные срастания" value={displayMetrics.coarseFraction} pixels={displayMetrics.coarsePixels} />
+          <MetricRow label="Тонкие срастания" value={displayMetrics.fineFraction} pixels={displayMetrics.finePixels} />
+          <MetricRow label="Нерудная матрица" value={displayMetrics.matrixFraction} pixels={displayMetrics.matrixPixels} />
+          <Typography variant="caption" sx={{ color: 'text.secondary', pt: 0.5 }}>
+            Доля сульфидов (обычные + тонкие): {formatPercent(displayMetrics.sulfideFraction)}
+          </Typography>
         </Stack>
       ) : (
         <Typography
@@ -175,7 +181,7 @@ export function FrameClassPanel({ frame, depositId, talcThreshold, liveMetrics, 
   );
 }
 
-function MetricRow({ label, value }: { label: string; value: number }) {
+function MetricRow({ label, value, pixels }: { label: string; value: number; pixels?: number }) {
   return (
     <Box>
       <Stack direction="row" sx={{
@@ -186,7 +192,14 @@ function MetricRow({ label, value }: { label: string; value: number }) {
         }}>
           {label}
         </Typography>
-        <Typography variant="body2">{formatPercent(value)}</Typography>
+        <Stack sx={{ alignItems: 'flex-end' }} spacing={0}>
+          <Typography variant="body2">{formatPercent(value)}</Typography>
+          {pixels != null && (
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              {formatPixels(pixels)}
+            </Typography>
+          )}
+        </Stack>
       </Stack>
       <LinearProgress variant="determinate" value={Math.min(100, value * 100)} sx={{ height: 4, borderRadius: 2 }} />
     </Box>

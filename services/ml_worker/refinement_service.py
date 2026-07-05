@@ -30,7 +30,7 @@ class CalibrationRefinementService:
     def refine(
         self,
         rgb: np.ndarray,
-        block01_features: np.ndarray | torch.Tensor,
+        block11_features: np.ndarray | torch.Tensor,
         hint_mask: np.ndarray,
         ui_class: str,
         *,
@@ -53,8 +53,8 @@ class CalibrationRefinementService:
             class_id,
             gray,
             hint_bool,
-            max_samples=self.config.max_samples,
-            random_state=self.config.random_state,
+            rgb=rgb,
+            talc_black_max=self.config.talc_black_max,
         )
         if not np.any(filtered):
             raise ValueError("no valid samples after class filter")
@@ -63,7 +63,7 @@ class CalibrationRefinementService:
         rgb_by_class, emb_by_class, extract_report = extract_samples_from_image(
             rgb,
             class_masks,
-            block01_features,
+            block11_features,
             max_samples=self.config.max_samples,
             random_state=self.config.random_state,
         )
@@ -79,16 +79,15 @@ class CalibrationRefinementService:
         calib = self.calib_store.get()
 
         feats = (
-            block01_features
-            if isinstance(block01_features, torch.Tensor)
-            else torch.from_numpy(block01_features.astype(np.float32))
+            block11_features
+            if isinstance(block11_features, torch.Tensor)
+            else torch.from_numpy(block11_features.astype(np.float32))
         )
-        needs_block01 = self.config.mode in ("embedding", "hybrid")
         result = self.segmentation.run(
             rgb,
             calib,
-            block01_features=feats if needs_block01 else None,
             block01_activation=block01_activation if self.config.mode == "hybrid" else None,
+            block11_features=feats if self.config.mode == "embedding" else None,
         )
         result.metadata["refinement"] = {
             "ui_class": ui_class,

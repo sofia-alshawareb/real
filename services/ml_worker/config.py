@@ -39,8 +39,20 @@ class SegmentationConfig:
     illum_sigma: float = 64.0
     region_overlap: float = 0.60
     block_index: int = 1
-    fg_dilate_radius: int = 5
+    fg_dilate_radius: int = 7
+    talc_refine_fg_dilate_radius: int = 10
+    talc_gmm_fg_buffer_radius: int = 8
+    talc_gmm_gate_erode: int = 2
     talc_black_max: float = 45.0
+    talc_min_cosine: float = 0.3
+    talc_min_cosine_margin: float = 0.0
+    talc_contour_dilate: int = 4
+    tile_threshold: int = 2000
+    tile_grid: int = 2
+    talc_block01_overlap: float = 0.4
+    talc_gmm_threshold_high_bias: float = 0.35
+    talc_margin_relax: float = 0.0
+    talc_refine_mode: str = "dino"
 
 
 @dataclass
@@ -104,8 +116,28 @@ def load_config(path: Path | str | None = None) -> ServiceConfig:
             illum_sigma=float(seg_raw.get("illum_sigma", 64.0)),
             region_overlap=float(seg_raw.get("region_overlap", 0.60)),
             block_index=int(seg_raw.get("block_index", 1)),
-            fg_dilate_radius=int(seg_raw.get("fg_dilate_radius", 5)),
+            fg_dilate_radius=int(seg_raw.get("fg_dilate_radius", 7)),
+            talc_refine_fg_dilate_radius=int(
+                seg_raw.get("talc_refine_fg_dilate_radius", 10)
+            ),
+            talc_gmm_fg_buffer_radius=int(
+                seg_raw.get("talc_gmm_fg_buffer_radius", 8)
+            ),
+            talc_gmm_gate_erode=int(seg_raw.get("talc_gmm_gate_erode", 2)),
             talc_black_max=float(seg_raw.get("talc_black_max", 45.0)),
+            talc_min_cosine=float(
+                seg_raw.get("talc_min_cosine", seg_raw.get("talc_gradient_threshold", 0.3))
+            ),
+            talc_min_cosine_margin=float(seg_raw.get("talc_min_cosine_margin", 0.0)),
+            talc_contour_dilate=int(seg_raw.get("talc_contour_dilate", 2)),
+            tile_threshold=int(seg_raw.get("tile_threshold", 2000)),
+            tile_grid=int(seg_raw.get("tile_grid", 2)),
+            talc_block01_overlap=float(seg_raw.get("talc_block01_overlap", 0.4)),
+            talc_gmm_threshold_high_bias=float(
+                seg_raw.get("talc_gmm_threshold_high_bias", 0.35)
+            ),
+            talc_margin_relax=float(seg_raw.get("talc_margin_relax", 0.0)),
+            talc_refine_mode=str(seg_raw.get("talc_refine_mode", "dino")),
         ),
         storage=StorageConfig(
             root=_resolve_path(storage_raw.get("root", "data/artifacts")),

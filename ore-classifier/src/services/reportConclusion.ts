@@ -22,8 +22,14 @@ export function buildConclusionText(experiment: Experiment): string {
   const avgCoarse = sum.coarse / n;
   const avgFine = sum.fine / n;
   const classLabel = ORE_CLASS_META[experiment.experimentClass].label.toLowerCase();
-  const dominant =
-    avgCoarse >= avgFine
+  const coarsePx = framesWithMetrics.reduce((acc, f) => acc + (f.metrics!.coarsePixels ?? 0), 0);
+  const finePx = framesWithMetrics.reduce((acc, f) => acc + (f.metrics!.finePixels ?? 0), 0);
+  const hasPixelCounts = framesWithMetrics.every((f) => f.metrics!.coarsePixels != null && f.metrics!.finePixels != null);
+  const dominant = hasPixelCounts
+    ? finePx > coarsePx
+      ? `преобладание тонких срастаний — ${finePx.toLocaleString('ru-RU')} px против ${coarsePx.toLocaleString('ru-RU')} px`
+      : `преобладание обычных срастаний — ${coarsePx.toLocaleString('ru-RU')} px против ${finePx.toLocaleString('ru-RU')} px`
+    : avgCoarse >= avgFine
       ? `преобладание обычных срастаний — ${pct(avgCoarse)}`
       : `преобладание тонких срастаний — ${pct(avgFine)}`;
   return `Руда классифицирована как ${classLabel}: содержание талька — ${pct(avgTalc)}, ${dominant}.`;

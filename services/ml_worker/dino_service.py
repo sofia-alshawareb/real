@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from ml.lib.constants import COARSE_FINE_DINO_BLOCK, TALC_EMBEDDING_BLOCK
 from ml.lib.dino.inference import extract_multi_block_features
 from ml.lib.dino.model import DinoModelCache, resolve_dino_weights, validate_block_indices
 from ml.lib.types import DinoArtifacts, DinoInferenceResult
@@ -35,9 +36,13 @@ class DinoInferenceService:
                 f"dino.num_blocks must be 12 for block extraction, got {self.config.num_blocks}"
             )
         blocks = [int(b) for b in self.config.inference_blocks]
-        if 1 not in blocks:
+        if COARSE_FINE_DINO_BLOCK not in blocks:
             raise ValueError(
-                f"dino.inference_blocks must include block 1, got {blocks}"
+                f"dino.inference_blocks must include block {COARSE_FINE_DINO_BLOCK}, got {blocks}"
+            )
+        if TALC_EMBEDDING_BLOCK not in blocks:
+            raise ValueError(
+                f"dino.inference_blocks must include block {TALC_EMBEDDING_BLOCK} for talc embedding, got {blocks}"
             )
         validate_block_indices(self.config.num_blocks, blocks)
 

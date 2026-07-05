@@ -17,17 +17,23 @@ from ml.lib.constants import (
     CLASS_NAMES,
     CLASS_TIE_PRIORITY,
     CLS_BACKGROUND,
-    CLS_TALC,
+    DEFAULT_EMBEDDING_BLOCK,
     DEFAULT_MIN_BACKPROJ_SCORE,
     DEFAULT_MIN_COSINE_SIM,
-    PATCH_SIZE,
     SEGMENTATION_MODE_EMBEDDING,
     SEGMENTATION_MODE_HYBRID,
     SEGMENTATION_MODE_INTENSITY,
 )
 from ml.lib.dino.inference import upsample_patch_map
+from ml.lib.calibration.filters import rgb_to_gray
+from ml.lib.calibration.talc_threshold import resolve_talc_intensity_max
 from ml.lib.segmentation.intensity_fg import segment_coarse_fine_intensity
-from ml.lib.segmentation.talc_intensity import segment_talc_intensity_gmm
+from ml.lib.constants import TALC_REFINE_MODE_DINO, TALC_REFINE_MODE_GRADIENT
+from ml.lib.segmentation.talc_intensity import (
+    refine_talc_with_block01_activation,
+    refine_talc_with_image_gradient,
+    segment_talc_hybrid,
+)
 from ml.lib.segmentation.regions import (
     build_final_segmentation,
     class_counts,
@@ -153,76 +159,16 @@ def segment_embedding_cosine(
     return labels.astype(np.uint8), meta
 
 
-def segment_talc_embedding(
-    rgb: np.ndarray,
-    block01_features: torch.Tensor | np.ndarray,
-    calib: CalibrationData,
-    *,
-    min_cosine: float = DEFAULT_MIN_COSINE_SIM,
-    exclude_mask: np.ndarray | None = None,
-    close_radius: int = 0,
-) -> tuple[np.ndarray, dict[str, Any]]:
-    """Talc patches via nearest-neighbor: talc vs calibrated background embedding."""
-    h, w = rgb.shape[:2]
-    talc_stats = calib.stats.get("talc")
-    if (
-        talc_stats is None
-        or (talc_stats.count or 0) == 0
-        or talc_stats.mean_embedding is None
-    ):
-        return np.zeros((h, w), dtype=np.uint8), {
-            "method": "talc_embedding",
-            "warning": "no talc calibration",
-        }
-
-    unit, _c, hp, wp = unit_patch_vectors(block01_features)
-    mean_talc = talc_stats.mean_embedding.astype(np.float32)
-    sim_talc = (unit @ mean_talc).reshape(hp, wp)
-
-    mean_bg = calib.background_mean_embedding()
-    if mean_bg is not None:
-        sim_bg = (unit @ mean_bg.astype(np.float32)).reshape(hp, wp)
-        patch_mask = sim_talc > sim_bg
-        classifier = "talc_vs_background_nn"
-    else:
-        patch_mask = sim_talc >= min_cosine
-        classifier = "talc_threshold_fallback"
-
-    talc_up = upsample_patch_map(patch_mask.astype(np.float32), (h, w)) >= 0.5
-    talc_mask = talc_up.astype(np.uint8)
-
-    if exclude_mask is not None:
-        talc_mask[exclude_mask.astype(bool)] = 0
-
-    if close_radius > 0 and np.any(talc_mask):
-        label_map = np.zeros((h, w), dtype=np.int32)
-        label_map[talc_mask.astype(bool)] = CLS_TALC
-        label_map = morphological_close_label_map(
-            label_map,
-            radius=close_radius,
-            class_ids=[CLS_BACKGROUND, CLS_TALC],
-        )
-        talc_mask = (label_map == CLS_TALC).astype(np.uint8)
-
-    meta = {
-        "method": "talc_embedding",
-        "classifier": classifier,
-        "min_cosine": float(min_cosine),
-        "patch_grid": [hp, wp],
-        "pixel_count": int(talc_mask.sum()),
-        "background_calibrated": mean_bg is not None,
-    }
-    return talc_mask, meta
-
-
 def segment_hybrid(
     rgb: np.ndarray,
     block01_activation: np.ndarray,
-    block01_features: torch.Tensor | np.ndarray,
     calib: CalibrationData,
     config: SegmentConfig,
+    *,
+    block11_features: torch.Tensor | np.ndarray | None = None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    """Coarse/fine via intensity GMM; talc via 2-GMM on intensity outside dilated FG."""
+    """Coarse/fine via block-1 activation; talc via dark coarse gate + DINO or gradient refine."""
+    del block11_features  # hybrid talc no longer uses block-11 embedding similarity
     fg_object, partitions, fg_mask, fg_meta = segment_coarse_fine_intensity(
         rgb,
         block01_activation,
@@ -234,18 +180,57 @@ def segment_hybrid(
         region_overlap=config.region_overlap,
         close_radius=config.close_radius,
     )
-    talc_mask, talc_meta = segment_talc_intensity_gmm(
+    talc_mask, talc_meta = segment_talc_hybrid(
         rgb,
         fg_mask.astype(bool),
         fg_dilate_radius=config.fg_dilate_radius,
-        talc_black_max=config.talc_black_max,
-        preprocess=config.preprocess,
-        denoise=config.denoise,
-        illum_sigma=config.illum_sigma,
-        max_samples=config.max_samples,
-        random_state=config.random_state,
+        talc_black_max=resolve_talc_intensity_max(calib, config.talc_black_max),
         close_radius=config.close_radius,
     )
+    refine_mode = config.talc_refine_mode
+    if refine_mode == TALC_REFINE_MODE_DINO:
+        talc_mask, refine_meta = refine_talc_with_block01_activation(
+            talc_mask,
+            block01_activation,
+            rgb_to_gray(rgb),
+            overlap_threshold=config.talc_block01_overlap,
+            max_samples=config.max_samples,
+            random_state=config.random_state,
+            close_radius=config.close_radius,
+            gate_dilate_radius=config.talc_contour_dilate,
+            fg_mask=fg_mask.astype(bool),
+            fg_dilate_radius=config.talc_refine_fg_dilate_radius,
+            gmm_fg_buffer_radius=config.talc_gmm_fg_buffer_radius,
+            gmm_gate_erode_radius=config.talc_gmm_gate_erode,
+        )
+        talc_meta["refine_mode"] = refine_mode
+        talc_meta["block01_refine"] = refine_meta
+    elif refine_mode == TALC_REFINE_MODE_GRADIENT:
+        talc_mask, refine_meta = refine_talc_with_image_gradient(
+            talc_mask,
+            rgb,
+            preprocess=config.preprocess,
+            denoise=config.denoise,
+            illum_sigma=config.illum_sigma,
+            overlap_threshold=config.talc_block01_overlap,
+            max_samples=config.max_samples,
+            random_state=config.random_state,
+            close_radius=config.close_radius,
+            gate_dilate_radius=config.talc_contour_dilate,
+            fg_mask=fg_mask.astype(bool),
+            fg_dilate_radius=config.talc_refine_fg_dilate_radius,
+            gmm_fg_buffer_radius=config.talc_gmm_fg_buffer_radius,
+            gmm_gate_erode_radius=config.talc_gmm_gate_erode,
+            gmm_threshold_high_bias=config.talc_gmm_threshold_high_bias,
+        )
+        talc_meta["refine_mode"] = refine_mode
+        talc_meta["gradient_refine"] = refine_meta
+    else:
+        raise ValueError(
+            f"Unknown talc_refine_mode {refine_mode!r}; "
+            f"expected {TALC_REFINE_MODE_DINO!r} or {TALC_REFINE_MODE_GRADIENT!r}"
+        )
+    talc_meta["pixel_count"] = int(talc_mask.sum())
     labels = build_final_segmentation(fg_object, partitions, talc_mask)
     if config.close_radius > 0:
         labels = morphological_close_label_map(
@@ -275,7 +260,10 @@ def segment_calibrated(
     t0 = time.perf_counter()
     mode = config.segmentation_mode
     close_radius = config.close_radius
-    block_features = block01_features if block01_features is not None else block11_features
+    if config.block_index == DEFAULT_EMBEDDING_BLOCK:
+        block_features = block11_features if block11_features is not None else block01_features
+    else:
+        block_features = block01_features if block01_features is not None else block11_features
 
     if mode == SEGMENTATION_MODE_INTENSITY:
         labels, seg_meta = segment_rgb_backprojection(
@@ -286,7 +274,7 @@ def segment_calibrated(
         )
     elif mode == SEGMENTATION_MODE_EMBEDDING:
         if block_features is None:
-            raise ValueError("block01_features required for embedding segmentation mode")
+            raise ValueError("block11_features required for embedding segmentation mode")
         labels, seg_meta = segment_embedding_cosine(
             rgb,
             block_features,
@@ -295,16 +283,14 @@ def segment_calibrated(
             close_radius=close_radius,
         )
     elif mode == SEGMENTATION_MODE_HYBRID:
-        if block01_activation is None or block_features is None:
-            raise ValueError(
-                "block01_activation and block01_features required for hybrid segmentation mode"
-            )
+        if block01_activation is None:
+            raise ValueError("block01_activation required for hybrid segmentation mode")
         labels, seg_meta = segment_hybrid(
             rgb,
             block01_activation,
-            block_features,
             calib,
             config,
+            block11_features=block11_features,
         )
     else:
         raise ValueError(f"Unknown segmentation mode: {mode!r}")

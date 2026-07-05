@@ -2,7 +2,8 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useDepositsStore } from '../stores/depositsStore';
 import { useExperimentsStore } from '../stores/experimentsStore';
 import { retryAllFailed, ensureQueueRunning } from './mockMl/queueRunner';
-import { seedIfEmpty } from './seed/seedData';
+import { removeLegacyDemoDataOnce } from './appData';
+import { seedDepositsIfEmpty } from './depositCatalog';
 
 let bootstrapped = false;
 
@@ -14,7 +15,8 @@ export async function bootstrapApp(): Promise<void> {
     .getState()
     .registerLinkChecker((depositId) => useExperimentsStore.getState().experiments.some((e) => e.depositId === depositId));
 
-  await seedIfEmpty();
+  await removeLegacyDemoDataOnce();
+  seedDepositsIfEmpty();
 
   let prevOffline = useSettingsStore.getState().mlOffline;
   useSettingsStore.subscribe((state) => {

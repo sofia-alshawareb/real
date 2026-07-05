@@ -24,6 +24,10 @@ export function formatPercent(v: number, digits = 1): string {
   return `${(v * 100).toFixed(digits)}%`;
 }
 
+export function formatPixels(n: number): string {
+  return `${n.toLocaleString('ru-RU')} px`;
+}
+
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} Б`;
   const units = ['КБ', 'МБ', 'ГБ'];

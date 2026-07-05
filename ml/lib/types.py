@@ -13,7 +13,19 @@ from ml.lib.constants import (
     DEFAULT_MIN_COSINE_SIM,
     DEFAULT_REGION_OVERLAP,
     DEFAULT_FG_DILATE_RADIUS,
+    DEFAULT_TALC_REFINE_FG_DILATE_RADIUS,
+    DEFAULT_TALC_GMM_FG_BUFFER_RADIUS,
+    DEFAULT_TALC_GMM_GATE_ERODE,
     DEFAULT_TALC_BLACK_MAX,
+    DEFAULT_TALC_MIN_COSINE,
+    DEFAULT_TALC_MIN_COSINE_MARGIN,
+    DEFAULT_TALC_CONTOUR_DILATE,
+    DEFAULT_TALC_BLOCK01_OVERLAP,
+    DEFAULT_TALC_GMM_THRESHOLD_HIGH_BIAS,
+    DEFAULT_TALC_MARGIN_RELAX,
+    DEFAULT_TALC_REFINE_MODE,
+    TALC_REFINE_MODE_DINO,
+    TALC_REFINE_MODE_GRADIENT,
     SEGMENTATION_MODE_INTENSITY,
 )
 
@@ -33,7 +45,17 @@ class SegmentConfig:
     min_backproj_score: float = DEFAULT_MIN_BACKPROJ_SCORE
     min_cosine_sim: float = DEFAULT_MIN_COSINE_SIM
     fg_dilate_radius: int = DEFAULT_FG_DILATE_RADIUS
+    talc_refine_fg_dilate_radius: int = DEFAULT_TALC_REFINE_FG_DILATE_RADIUS
+    talc_gmm_fg_buffer_radius: int = DEFAULT_TALC_GMM_FG_BUFFER_RADIUS
+    talc_gmm_gate_erode: int = DEFAULT_TALC_GMM_GATE_ERODE
     talc_black_max: float = DEFAULT_TALC_BLACK_MAX
+    talc_min_cosine: float = DEFAULT_TALC_MIN_COSINE
+    talc_min_cosine_margin: float = DEFAULT_TALC_MIN_COSINE_MARGIN
+    talc_contour_dilate: int = DEFAULT_TALC_CONTOUR_DILATE
+    talc_block01_overlap: float = DEFAULT_TALC_BLOCK01_OVERLAP
+    talc_gmm_threshold_high_bias: float = DEFAULT_TALC_GMM_THRESHOLD_HIGH_BIAS
+    talc_margin_relax: float = DEFAULT_TALC_MARGIN_RELAX
+    talc_refine_mode: str = DEFAULT_TALC_REFINE_MODE
     rgb_hist_bins: int = 32
 
 

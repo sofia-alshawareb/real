@@ -18,15 +18,16 @@ if str(_ROOT) not in sys.path:
 from ml.lib.calibration.colors import class_masks_from_colored_png
 from ml.lib.calibration.extract import extract_background_embeddings, extract_samples_from_image
 from ml.lib.calibration.overlays import FILTERED_TALC_OVERLAY_NAME, save_filtered_talc_overlay
+from ml.lib.calibration.talc_threshold import calibrate_talc_from_labeled_images
 from ml.lib.calibration.store import CalibrationStore
-from ml.lib.constants import CALIB_BACKGROUND_KEY, CALIB_CLASS_KEYS, DEFAULT_CALIBRATION_DIR
+from ml.lib.constants import CALIB_BACKGROUND_KEY, CALIB_CLASS_KEYS, DEFAULT_CALIBRATION_DIR, DEFAULT_TALC_MIN_COSINE, TALC_EMBEDDING_BLOCK
 
 
 def _load_rgb(path: Path) -> np.ndarray:
     return np.asarray(Image.open(path).convert("RGB"))
 
 
-def _load_block01(path: Path) -> np.ndarray:
+def _load_features(path: Path) -> np.ndarray:
     return np.load(path).astype(np.float32)
 
 
@@ -44,22 +45,27 @@ def compile_calibration(
     merged_rgb: dict[str, list[np.ndarray]] = {k: [] for k in CALIB_CLASS_KEYS}
     merged_emb: dict[str, list[np.ndarray]] = {k: [] for k in CALIB_CLASS_KEYS}
     merged_bg_emb: list[np.ndarray] = []
+    talc_calib_samples: list[tuple[np.ndarray, np.ndarray, dict, str]] = []
     report: dict = {"images": {}, "source_images": []}
     overlay_dir = output / "overlays"
 
     for img_dir in image_dirs:
         norm_path = img_dir / "normalized.png"
         mask_path = img_dir / "user_drawn_colored.png"
-        feat_path = img_dir / "block01_features.npy"
-        missing = [p.name for p in (norm_path, mask_path, feat_path) if not p.exists()]
+        feat01_path = img_dir / "block01_features.npy"
+        feat11_path = img_dir / "block11_features.npy"
+        act_path = img_dir / "block01_activation.npy"
+        missing = [p.name for p in (norm_path, mask_path, feat01_path, feat11_path) if not p.exists()]
         if missing:
             report["images"][img_dir.name] = {"skipped": True, "missing": missing}
             continue
 
         rgb = _load_rgb(norm_path)
         mask_rgb = _load_rgb(mask_path)
-        block01 = _load_block01(feat_path)
+        block01 = _load_features(feat01_path)
+        block11 = _load_features(feat11_path)
         class_masks = class_masks_from_colored_png(mask_rgb)
+        talc_calib_samples.append((rgb, block11, class_masks, img_dir.name))
         overlay_meta = save_filtered_talc_overlay(
             rgb,
             class_masks,
@@ -70,10 +76,11 @@ def compile_calibration(
         rgb_by_class, emb_by_class, img_report = extract_samples_from_image(
             rgb,
             class_masks,
-            block01,
+            block11,
             random_state=random_state,
         )
-        bg_emb = extract_background_embeddings(class_masks, block01)
+        bg_emb = extract_background_embeddings(class_masks, block11)
+        img_report["embedding_block"] = TALC_EMBEDDING_BLOCK
         img_report["background_embedding_count"] = int(bg_emb.shape[0])
         if bg_emb.size:
             merged_bg_emb.append(bg_emb)
@@ -98,8 +105,19 @@ def compile_calibration(
     if merged_bg_emb:
         final_emb[CALIB_BACKGROUND_KEY] = np.vstack(merged_bg_emb).astype(np.float32)
 
+    talc_contour_meta = calibrate_talc_from_labeled_images(
+        talc_calib_samples,
+        fallback_cosine=DEFAULT_TALC_MIN_COSINE,
+    )
+    report["talc_contour"] = talc_contour_meta
+
     store = CalibrationStore(output, rgb_hist_bins=rgb_hist_bins)
-    store.initialize_from_merged(final_rgb, final_emb, report["source_images"])
+    store.initialize_from_merged(
+        final_rgb,
+        final_emb,
+        report["source_images"],
+        talc_contour=talc_contour_meta,
+    )
     report["counts"] = store.summary_counts()
     report_path = output / "prep_report.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -119,7 +137,7 @@ def main() -> None:
         rgb_hist_bins=args.rgb_hist_bins,
         random_state=args.random_state,
     )
-    print(json.dumps({"output": str(args.output), "counts": report["counts"]}, indent=2))
+    print(json.dumps({"output": str(args.output), "counts": report["counts"], "talc_contour": report.get("talc_contour")}, indent=2))
 
 
 if __name__ == "__main__":

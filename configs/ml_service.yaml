@@ -2,7 +2,7 @@ dino:
   repo: data/models/dinov2
   weights: data/models/checkpoints/dinov2_vits14_reg4_pretrain.pth
   num_blocks: 12
-  inference_blocks: [1]
+  inference_blocks: [1, 11]
   save_activations: false
   device: ""
 segmentation:
@@ -20,9 +20,21 @@ segmentation:
   denoise: true
   illum_sigma: 64.0
   region_overlap: 0.60
-  block_index: 1
-  fg_dilate_radius: 5
+  block_index: 11
+  fg_dilate_radius: 7
+  talc_refine_fg_dilate_radius: 10
+  talc_gmm_fg_buffer_radius: 8
+  talc_gmm_gate_erode: 2
   talc_black_max: 45.0
+  talc_min_cosine: 0.3
+  talc_min_cosine_margin: 0.0
+  talc_contour_dilate: 5
+  tile_threshold: 2000
+  tile_grid: 2
+  talc_block01_overlap: 0.4
+  talc_gmm_threshold_high_bias: 0.35
+  talc_refine_mode: dino  # dino | gradient
+  talc_margin_relax: 0.0
 storage:
   root: data/artifacts
   images_subdir: images

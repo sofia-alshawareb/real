@@ -21,6 +21,32 @@ def pool_mask_to_patch_grid(mask: np.ndarray, hp: int, wp: int) -> np.ndarray:
     return out
 
 
+def expand_patch_grid_to_pixels(
+    patch_mask: np.ndarray,
+    height: int,
+    width: int,
+    *,
+    patch_size: int = PATCH_SIZE,
+) -> np.ndarray:
+    """Paint each True patch cell onto its pixel footprint."""
+    out = np.zeros((height, width), dtype=bool)
+    hp, wp = patch_mask.shape
+    for pr in range(hp):
+        y0 = pr * patch_size
+        y1 = min((pr + 1) * patch_size, height)
+        if y0 >= height:
+            break
+        for pc in range(wp):
+            if not patch_mask[pr, pc]:
+                continue
+            x0 = pc * patch_size
+            x1 = min((pc + 1) * patch_size, width)
+            if x0 >= width:
+                break
+            out[y0:y1, x0:x1] = True
+    return out
+
+
 def unit_patch_vectors(
     block11_features: np.ndarray | torch.Tensor,
 ) -> tuple[np.ndarray, int, int, int]:

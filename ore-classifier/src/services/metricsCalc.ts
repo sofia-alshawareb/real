@@ -1,5 +1,6 @@
-// Расчёт метрик по индексированной маске: прямой подсчёт площади каждого класса разметки.
-// Классы маски: 1=обычные срастания, 2=тонкие срастания, 3=тальк, 4=нерудная матрица.
+// Расчёт метрик по индексированной маске.
+// Доли считаются от всей площади кадра (width × height).
+// Матрица = все пиксели без разметки талька/срастаний (фон + явно помеченная матрица).
 
 import type { FrameMetrics } from '../types/models';
 
@@ -14,21 +15,20 @@ export function calcMetrics(mask: MaskBuffer): FrameMetrics {
   let coarse = 0;
   let fine = 0;
   let talc = 0;
-  let matrix = 0;
-  let classified = 0;
+  let labeled = 0;
   for (let i = 0; i < total; i++) {
     const v = mask.data[i];
     if (v === 1) coarse++;
     else if (v === 2) fine++;
     else if (v === 3) talc++;
-    else if (v === 4) matrix++;
-    if (v !== 0) classified++;
+    if (v !== 0) labeled++;
   }
-  const denom = classified || 1;
+  const denom = total || 1;
+  const matrix = total - coarse - fine - talc;
   const talcFraction = talc / denom;
-  const matrixFraction = matrix / denom;
   const coarseFraction = coarse / denom;
   const fineFraction = fine / denom;
+  const matrixFraction = matrix / denom;
   const sulfideFraction = coarseFraction + fineFraction;
 
   return {
@@ -37,6 +37,9 @@ export function calcMetrics(mask: MaskBuffer): FrameMetrics {
     matrixFraction,
     coarseFraction,
     fineFraction,
-    classifiedShare: classified / total,
+    coarsePixels: coarse,
+    finePixels: fine,
+    matrixPixels: matrix,
+    classifiedShare: labeled / denom,
   };
 }

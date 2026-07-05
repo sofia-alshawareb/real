@@ -59,8 +59,7 @@ def extract_samples_from_image(
             cls_id,
             gray,
             mask,
-            max_samples=max_samples,
-            random_state=random_state,
+            rgb=rgb,
         )
         if not np.any(filtered):
             rgb_out[class_key] = np.zeros((0, 3), dtype=np.float32)

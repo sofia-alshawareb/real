@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import json
 
 from ml.lib.types import DinoArtifacts, SegmentationResult
 from services.ml_worker.storage.filesystem import FilesystemArtifactStore
@@ -40,3 +41,31 @@ def test_dino_artifacts_roundtrip(tmp_path):
     store.save_dino("img1", artifacts)
     loaded = store.load_dino("img1")
     assert np.allclose(loaded.block01_activation, artifacts.block01_activation)
+
+
+def test_block01_features_roundtrip(tmp_path):
+    store = FilesystemArtifactStore(tmp_path)
+    feats = np.arange(32, dtype=np.float32).reshape(8, 2, 2)
+    act = np.ones((28, 28), dtype=np.float32)
+    dino_dir = tmp_path / "img2" / "dino"
+    store.write_block01_features(dino_dir, feats, activation=act, meta={"test": True})
+    assert store.dino_features_ready("img2")
+    loaded = store.load_block01_features("img2")
+    assert np.allclose(loaded, feats)
+    loaded_act = store.load_block01_activation("img2")
+    assert np.allclose(loaded_act, act)
+
+
+def test_user_drawn_mask_roundtrip(tmp_path):
+    store = FilesystemArtifactStore(tmp_path)
+    labels = np.array([[0, 1, 2], [3, 4, 0]], dtype=np.uint8)
+    manual_dir = store.save_user_drawn_mask("dev1", labels)
+    assert store.user_drawn_mask_ready("dev1")
+    assert manual_dir.name == "manual"
+    loaded = np.load(manual_dir / "user_drawn_labels.npy")
+    assert np.array_equal(loaded, labels)
+    assert (manual_dir / "user_drawn_colored.png").exists()
+    assert (manual_dir / "user_drawn_grayscale.png").exists()
+    meta = json.loads((manual_dir / "meta.json").read_text(encoding="utf-8"))
+    assert meta["encoding"] == "ui_class_index"
+

@@ -9,6 +9,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from ml.lib.constants import PATCH_SIZE
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -41,6 +43,19 @@ def synthetic_rgb() -> np.ndarray:
     rgb[20:100, 30:130] = (180, 60, 40)
     rgb[60:90, 50:110] = (30, 30, 30)
     return rgb
+
+
+@pytest.fixture
+def synthetic_block11_features(synthetic_rgb: np.ndarray) -> "torch.Tensor":
+    import torch
+
+    h, w = synthetic_rgb.shape[:2]
+    hp = (h + PATCH_SIZE - 1) // PATCH_SIZE
+    wp = (w + PATCH_SIZE - 1) // PATCH_SIZE
+    c = 8
+    feats = torch.randn(c, hp, wp)
+    feats = feats / feats.norm(dim=0, keepdim=True).clamp(min=1e-6)
+    return feats
 
 
 @pytest.fixture

@@ -214,15 +214,18 @@ class CalibrationStore:
         else:
             emb_summary[CALIB_BACKGROUND_KEY] = {"mean": None, "count": 0}
         data.rgb_histograms = histograms
-        return {
+        summary = {
             "schema_version": CALIBRATION_SCHEMA_VERSION,
             "source_images": data.source_images,
-            "segmentation_modes": ["intensity", "embedding"],
+            "segmentation_modes": ["intensity", "embedding", "hybrid"],
             "rgb_hist_bins": self.rgb_hist_bins,
             "saved_at": datetime.now(timezone.utc).isoformat(),
             "rgb": rgb_summary,
             "embedding": emb_summary,
         }
+        if data.meta.get("talc_contour"):
+            summary["talc_contour"] = data.meta["talc_contour"]
+        return summary
 
     def save(self, data: CalibrationData) -> None:
         summary = self._compute_stats(data)
@@ -315,8 +318,12 @@ class CalibrationStore:
         merged_rgb: dict[str, np.ndarray],
         merged_emb: dict[str, np.ndarray],
         source_images: list[str],
+        *,
+        talc_contour: dict[str, Any] | None = None,
     ) -> None:
         data = CalibrationData(source_images=list(source_images))
+        if talc_contour:
+            data.meta["talc_contour"] = talc_contour
         for key in CALIB_CLASS_KEYS:
             data.rgb_samples[key] = merged_rgb.get(key, np.zeros((0, 3), np.float32)).astype(np.float32)
             data.embedding_samples[key] = _normalize_embedding_rows(
@@ -327,6 +334,12 @@ class CalibrationStore:
             data.embedding_samples[CALIB_BACKGROUND_KEY] = _normalize_embedding_rows(
                 bg_rows.astype(np.float32)
             )
+        self.save(data)
+
+    def update_talc_contour(self, talc_contour: dict[str, Any]) -> None:
+        """Merge talc texture calibration into an existing compiled store."""
+        data = self.get()
+        data.meta["talc_contour"] = talc_contour
         self.save(data)
 
     def summary_counts(self) -> dict[str, int]:

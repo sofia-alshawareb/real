@@ -13,8 +13,15 @@ import numpy as np
 import torch
 
 from ml.lib.calibration.store import CalibrationStore
-from ml.lib.constants import SEGMENTATION_MODE_EMBEDDING, SEGMENTATION_MODE_HYBRID
-from ml.lib.types import SegmentationResult
+from ml.lib.constants import COARSE_FINE_DINO_BLOCK, TALC_EMBEDDING_BLOCK, SEGMENTATION_MODE_EMBEDDING, SEGMENTATION_MODE_HYBRID
+from ml.lib.tiling import (
+    TileBounds,
+    merge_dino_inference_results,
+    merge_segmentation_results,
+    needs_tiling,
+    split_image_grid,
+)
+from ml.lib.types import DinoArtifacts, DinoInferenceResult, SegmentationResult
 
 from services.ml_worker.config import ServiceConfig, load_config
 from services.ml_worker.dino_service import DinoInferenceService
@@ -115,23 +122,125 @@ def get_job(state: WorkerState, job_id: str) -> JobRecord:
     return state.jobs[job_id]
 
 
-def _ensure_block01(state: WorkerState, image_id: str, rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _ensure_dino_blocks(
+    state: WorkerState, image_id: str, rgb: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Load or compute block-1 activation + block-1/11 features for hybrid pipeline."""
+    dino_dir = state.store._dino_dir(image_id)
     if state.store.dino_features_ready(image_id):
         return (
             state.store.load_block01_activation(image_id),
             state.store.load_block01_features(image_id),
+            state.store.load_block11_features(image_id),
         )
-    dino_result, _ = state.dino.run(rgb, save_activations=False)
-    dino_dir = state.store._dino_dir(image_id)
-    block01_act = dino_result.activation(1)
-    block01 = dino_result.features(1).numpy()
+    dino_result, _ = _run_dino(state, rgb, save_activations=False)
+    block01_act = dino_result.activation(COARSE_FINE_DINO_BLOCK)
+    block01 = dino_result.features(COARSE_FINE_DINO_BLOCK).numpy()
+    block11 = dino_result.features(TALC_EMBEDDING_BLOCK).numpy()
+    meta = {"inference_blocks": dino_result.inference_blocks, **dino_result.meta}
     state.store.write_block01_features(
         dino_dir,
         block01,
         activation=block01_act,
-        meta={"inference_blocks": dino_result.inference_blocks},
+        meta=meta,
     )
-    return block01_act, block01
+    state.store.write_block11_features(dino_dir, block11, meta=meta)
+    return block01_act, block01, block11
+
+
+def _run_dino(
+    state: WorkerState,
+    rgb: np.ndarray,
+    *,
+    save_activations: bool,
+) -> tuple[DinoInferenceResult, DinoArtifacts | None]:
+    """Run DINO on full image or 2x2 tiles when both dimensions exceed threshold."""
+    seg_cfg = state.config.segmentation
+    h, w = rgb.shape[:2]
+    if not needs_tiling(h, w, threshold=seg_cfg.tile_threshold):
+        return state.dino.run(rgb, save_activations=save_activations)
+
+    tile_parts: list[tuple[DinoInferenceResult, TileBounds]] = []
+    tile_artifacts: list[DinoArtifacts | None] = []
+    for tile_rgb, bounds in split_image_grid(rgb, seg_cfg.tile_grid):
+        result, artifacts = state.dino.run(tile_rgb, save_activations=save_activations)
+        tile_parts.append((result, bounds))
+        tile_artifacts.append(artifacts)
+
+    merged = merge_dino_inference_results(tile_parts, h, w)
+    merged_artifacts = None
+    if save_activations and all(a is not None for a in tile_artifacts):
+        merged_artifacts = DinoArtifacts.from_inference(merged)
+    return merged, merged_artifacts
+
+
+def _run_segmentation_pipeline(
+    state: WorkerState,
+    rgb: np.ndarray,
+    calib,
+    *,
+    save_activations: bool,
+) -> tuple[SegmentationResult, DinoInferenceResult | None, DinoArtifacts | None]:
+    """Run segmentation once, or on a 2x2 tile grid for large images."""
+    seg_cfg = state.config.segmentation
+    h, w = rgb.shape[:2]
+    mode = seg_cfg.mode
+    needs_dino = mode in (SEGMENTATION_MODE_HYBRID, SEGMENTATION_MODE_EMBEDDING)
+
+    if not needs_tiling(h, w, threshold=seg_cfg.tile_threshold):
+        dino_result = None
+        dino_artifacts = None
+        block01_activation = None
+        block01_features = None
+        block11_features = None
+        if needs_dino:
+            dino_result, dino_artifacts = state.dino.run(
+                rgb, save_activations=save_activations
+            )
+            block01_activation = dino_result.activation(COARSE_FINE_DINO_BLOCK)
+            block01_features = dino_result.features(COARSE_FINE_DINO_BLOCK)
+            block11_features = dino_result.features(TALC_EMBEDDING_BLOCK)
+        seg_result = state.segmentation.run(
+            rgb,
+            calib,
+            block01_activation=block01_activation,
+            block01_features=block01_features,
+            block11_features=block11_features,
+        )
+        return seg_result, dino_result, dino_artifacts
+
+    tile_seg: list[tuple[SegmentationResult, TileBounds]] = []
+    tile_dino: list[tuple[DinoInferenceResult, TileBounds]] = []
+    for tile_rgb, bounds in split_image_grid(rgb, seg_cfg.tile_grid):
+        block01_activation = None
+        block01_features = None
+        block11_features = None
+        dino_result = None
+        if needs_dino:
+            dino_result, _ = state.dino.run(tile_rgb, save_activations=False)
+            tile_dino.append((dino_result, bounds))
+            block01_activation = dino_result.activation(COARSE_FINE_DINO_BLOCK)
+            block01_features = dino_result.features(COARSE_FINE_DINO_BLOCK)
+            block11_features = dino_result.features(TALC_EMBEDDING_BLOCK)
+        tile_seg.append(
+            (
+                state.segmentation.run(
+                    tile_rgb,
+                    calib,
+                    block01_activation=block01_activation,
+                    block01_features=block01_features,
+                    block11_features=block11_features,
+                ),
+                bounds,
+            )
+        )
+
+    seg_result = merge_segmentation_results(tile_seg, h, w, grid=seg_cfg.tile_grid)
+    merged_dino = merge_dino_inference_results(tile_dino, h, w) if tile_dino else None
+    merged_artifacts = (
+        DinoArtifacts.from_inference(merged_dino) if save_activations and merged_dino else None
+    )
+    return seg_result, merged_dino, merged_artifacts
 
 
 def refine_calibration_from_hint(
@@ -144,10 +253,10 @@ def refine_calibration_from_hint(
         raise FileNotFoundError(f"Unknown image_id: {image_id}")
 
     rgb = state.store.load_rgb(image_id)
-    block01_act, block01 = _ensure_block01(state, image_id, rgb)
+    block01_act, _block01, block11 = _ensure_dino_blocks(state, image_id, rgb)
 
     result = state.refinement.refine(
-        rgb, block01, hint_mask, ui_class, block01_activation=block01_act
+        rgb, block11, hint_mask, ui_class, block01_activation=block01_act
     )
 
     prev_summary: dict = {}
@@ -210,37 +319,33 @@ def _run_segment_job(state: WorkerState, job: JobRecord) -> None:
     needs_dino = mode in (SEGMENTATION_MODE_HYBRID, SEGMENTATION_MODE_EMBEDDING)
 
     try:
-        block01_activation = None
-        block01_features = None
-        if needs_dino:
-            dino_result, dino_artifacts = state.dino.run(
-                rgb, save_activations=job.save_activations
-            )
-            job.progress = 0.5
-            block01_activation = dino_result.activation(1)
-            block01_features = dino_result.features(1)
-            block01_np = block01_features.numpy()
+        seg_result, dino_result, dino_artifacts = _run_segmentation_pipeline(
+            state,
+            rgb,
+            calib,
+            save_activations=job.save_activations,
+        )
+        job.progress = 0.5
+
+        if needs_dino and dino_result is not None:
             dino_temp = temp_dir / "dino"
+            meta = {"inference_blocks": dino_result.inference_blocks, **dino_result.meta}
             state.store.write_block01_features(
                 dino_temp,
-                block01_np,
-                activation=block01_activation,
-                meta={"inference_blocks": dino_result.inference_blocks},
+                dino_result.features(COARSE_FINE_DINO_BLOCK).numpy(),
+                activation=dino_result.activation(COARSE_FINE_DINO_BLOCK),
+                meta=meta,
+            )
+            state.store.write_block11_features(
+                dino_temp,
+                dino_result.features(TALC_EMBEDDING_BLOCK).numpy(),
+                meta=meta,
             )
             if dino_artifacts is not None:
                 state.store.write_dino(dino_temp, dino_artifacts)
 
-        seg_result = state.segmentation.run(
-            rgb,
-            calib,
-            block01_activation=block01_activation,
-            block01_features=block01_features,
-        )
         job.progress = 0.8
-
-        state.store.write_segmentation(
-            temp_dir / "segmentation", image_id, seg_result
-        )
+        state.store.write_segmentation(temp_dir / "segmentation", image_id, seg_result)
         state.store.commit_temp(image_id, temp_dir)
     except Exception:
         state.store.cleanup_temp(image_id)
