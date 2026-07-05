@@ -1,0 +1,124 @@
+{
+  "images": {
+    "img1": {
+      "classes": {
+        "coarse": {
+          "method": "none",
+          "filtered": false,
+          "rgb_count": 25383,
+          "embedding_count": 197
+        },
+        "talc": {
+          "talc_mask_pixels": 29944,
+          "talc_kept_pixels": 614,
+          "talc_rejected_pixels": 29330,
+          "rejection_rate": 0.9794950574405556,
+          "method": "black_threshold",
+          "talc_black_max": 45.0,
+          "rgb_count": 614,
+          "embedding_count": 57
+        }
+      },
+      "talc_filter": {
+        "talc_mask_pixels": 29944,
+        "talc_kept_pixels": 614,
+        "talc_rejected_pixels": 29330,
+        "rejection_rate": 0.9794950574405556,
+        "method": "black_threshold",
+        "talc_black_max": 45.0
+      },
+      "embedding_block": 11,
+      "background_embedding_count": 4865,
+      "filtered_talc_overlay": {
+        "talc_mask_pixels": 29944,
+        "talc_kept_pixels": 614,
+        "talc_rejected_pixels": 29330,
+        "rejection_rate": 0.9794950574405556,
+        "method": "black_threshold",
+        "talc_black_max": 45.0,
+        "overlay_path": "/home/human/bassel/real/real/data/calib/img1/filtered_talc_overlay.png",
+        "compiled_overlay_path": "/home/human/bassel/real/real/data/calib/compiled/overlays/img1_filtered_talc_overlay.png"
+      }
+    },
+    "img2": {
+      "classes": {
+        "fine": {
+          "method": "none",
+          "filtered": false,
+          "rgb_count": 113959,
+          "embedding_count": 700
+        },
+        "matrix": {
+          "method": "none",
+          "filtered": false,
+          "rgb_count": 98027,
+          "embedding_count": 629
+        }
+      },
+      "embedding_block": 11,
+      "background_embedding_count": 18557
+    },
+    "img3": {
+      "classes": {
+        "matrix": {
+          "method": "none",
+          "filtered": false,
+          "rgb_count": 342276,
+          "embedding_count": 2160
+        }
+      },
+      "embedding_block": 11,
+      "background_embedding_count": 17726
+    }
+  },
+  "source_images": [
+    "img1",
+    "img2",
+    "img3"
+  ],
+  "talc_contour": {
+    "method": "fallback_no_labeled_pairs",
+    "min_cosine": 0.3,
+    "talc_intensity_max": 45.0,
+    "min_region_mean_cosine": 0.3,
+    "per_image": {
+      "img1": {
+        "embedding": {
+          "skipped": true,
+          "reason": "no_background"
+        },
+        "intensity": {
+          "skipped": true,
+          "reason": "no_background"
+        }
+      },
+      "img2": {
+        "embedding": {
+          "skipped": true,
+          "reason": "no_talc"
+        },
+        "intensity": {
+          "skipped": true,
+          "reason": "no_talc"
+        }
+      },
+      "img3": {
+        "embedding": {
+          "skipped": true,
+          "reason": "no_talc"
+        },
+        "intensity": {
+          "skipped": true,
+          "reason": "no_talc"
+        }
+      }
+    },
+    "source": "sample_regions"
+  },
+  "counts": {
+    "coarse": 25383,
+    "fine": 113959,
+    "talc": 614,
+    "matrix": 440303
+  }
+}

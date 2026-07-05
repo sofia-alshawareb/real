@@ -1,0 +1,13 @@
+{
+  "image": "img1",
+  "raw_green_pixels": 25383,
+  "selected_rgb_pixels": 25383,
+  "filter": "none (all green mask pixels kept for coarse)",
+  "embedding_patches": 197,
+  "patch_expanded_pixels": 38612,
+  "patch_edge_expansion_pixels": 13229,
+  "runtime_coarse_pixels": 208472,
+  "overlap_green_and_runtime_coarse": 25289,
+  "green_not_runtime_coarse": 94,
+  "runtime_coarse_not_green": 183183
+}

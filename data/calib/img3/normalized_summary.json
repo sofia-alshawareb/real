@@ -1,0 +1,28 @@
+{
+  "input": "data/calib/img3/normalized.png",
+  "image_size": [
+    1704,
+    2272
+  ],
+  "block_indices": [
+    0,
+    11
+  ],
+  "num_blocks_in_model": 12,
+  "colormap": "inferno",
+  "overlay_alpha": 0.55,
+  "dino_repo": "/home/human/bassel/real/real/data/models/dinov2",
+  "dino_weights": "/home/human/bassel/real/real/data/models/checkpoints/dinov2_vits14_reg4_pretrain.pth",
+  "outputs": {
+    "block_00": {
+      "heatmap": "block_00_heatmap.png",
+      "activation_npy": "block_00_activation.npy",
+      "overlay": "block_00_overlay.png"
+    },
+    "block_11": {
+      "heatmap": "block_11_heatmap.png",
+      "activation_npy": "block_11_activation.npy",
+      "overlay": "block_11_overlay.png"
+    }
+  }
+}

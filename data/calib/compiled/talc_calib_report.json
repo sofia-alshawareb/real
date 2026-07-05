@@ -1,0 +1,135 @@
+{
+  "artifacts_root": "/home/human/bassel/real/real/data/artifacts",
+  "calibration_dir": "/home/human/bassel/real/real/data/calib/compiled",
+  "n_samples": 4,
+  "artifact_ids": [
+    "7801457116c538e7",
+    "97b97585ce9bfe0a",
+    "c75ea7479f64c31f",
+    "d265c95f8dcf991e"
+  ],
+  "talc_contour": {
+    "method": "calibrated_margin_midpoint",
+    "n_talc_patches": 951,
+    "n_background_patches": 970,
+    "min_cosine_margin": -0.030135899782180786,
+    "min_region_mean_margin": -0.030135899782180786,
+    "talc_margin_median": 0.05916506052017212,
+    "background_margin_median": -0.11943686008453369,
+    "talc_margin_p25": -0.041700661182403564,
+    "background_margin_p75": -0.06873781979084015,
+    "n_talc_pixels": 142309,
+    "n_background_pixels": 141905,
+    "talc_intensity_max": 42.66666603088379,
+    "talc_median": 39.33333206176758,
+    "talc_p90": 52.0,
+    "background_median": 46.0,
+    "per_image": {
+      "7801457116c538e7": {
+        "embedding": {
+          "skipped": false,
+          "n_talc_patches": 32,
+          "n_background_patches": 71,
+          "embedding_dim": 384
+        },
+        "intensity": {
+          "skipped": false,
+          "n_talc_pixels": 929,
+          "n_background_pixels": 7474,
+          "talc_median": 11.0,
+          "background_median": 29.0
+        },
+        "margin": {
+          "skipped": false,
+          "n_talc_patches": 32,
+          "n_background_patches": 71,
+          "talc_margin_median": 0.01997968554496765,
+          "background_margin_median": -0.05911344289779663,
+          "talc_cosine_median": 0.5802865028381348,
+          "background_cosine_median": 0.5732303261756897
+        }
+      },
+      "97b97585ce9bfe0a": {
+        "embedding": {
+          "skipped": false,
+          "n_talc_patches": 27,
+          "n_background_patches": 49,
+          "embedding_dim": 384
+        },
+        "intensity": {
+          "skipped": false,
+          "n_talc_pixels": 1203,
+          "n_background_pixels": 4244,
+          "talc_median": 35.66666793823242,
+          "background_median": 61.33333206176758
+        },
+        "margin": {
+          "skipped": false,
+          "n_talc_patches": 27,
+          "n_background_patches": 49,
+          "talc_margin_median": 0.11112642288208008,
+          "background_margin_median": -0.04233008623123169,
+          "talc_cosine_median": 0.682344377040863,
+          "background_cosine_median": 0.6576038599014282
+        }
+      },
+      "c75ea7479f64c31f": {
+        "embedding": {
+          "skipped": false,
+          "n_talc_patches": 27,
+          "n_background_patches": 217,
+          "embedding_dim": 384
+        },
+        "intensity": {
+          "skipped": false,
+          "n_talc_pixels": 1737,
+          "n_background_pixels": 29868,
+          "talc_median": 27.66666603088379,
+          "background_median": 30.33333396911621
+        },
+        "margin": {
+          "skipped": false,
+          "n_talc_patches": 27,
+          "n_background_patches": 217,
+          "talc_margin_median": -0.051661789417266846,
+          "background_margin_median": -0.2905620336532593,
+          "talc_cosine_median": 0.6366710066795349,
+          "background_cosine_median": 0.5835455060005188
+        }
+      },
+      "d265c95f8dcf991e": {
+        "embedding": {
+          "skipped": false,
+          "n_talc_patches": 865,
+          "n_background_patches": 633,
+          "embedding_dim": 384
+        },
+        "intensity": {
+          "skipped": false,
+          "n_talc_pixels": 138440,
+          "n_background_pixels": 100319,
+          "talc_median": 39.66666793823242,
+          "background_median": 49.0
+        },
+        "margin": {
+          "skipped": false,
+          "n_talc_patches": 865,
+          "n_background_patches": 633,
+          "talc_margin_median": 0.058034658432006836,
+          "background_margin_median": -0.11001837253570557,
+          "talc_cosine_median": 0.6678755283355713,
+          "background_cosine_median": 0.6247105598449707
+        }
+      }
+    },
+    "source": "sample_regions",
+    "n_images": 4,
+    "embedding_block": 11,
+    "artifact_ids": [
+      "7801457116c538e7",
+      "97b97585ce9bfe0a",
+      "c75ea7479f64c31f",
+      "d265c95f8dcf991e"
+    ]
+  }
+}

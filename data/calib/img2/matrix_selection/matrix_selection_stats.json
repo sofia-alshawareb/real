@@ -1,0 +1,16 @@
+{
+  "image": "img2",
+  "raw_gray_matrix_pixels": 98027,
+  "selected_rgb_pixels": 98027,
+  "filter": "none (all gray matrix mask pixels kept)",
+  "matrix_embedding_patches": 629,
+  "patch_expanded_pixels": 123284,
+  "patch_edge_expansion_pixels": 25257,
+  "calib_background_pixels_unpainted": 3659502,
+  "calib_background_patches": 19025,
+  "runtime_background_pixels": 1055820,
+  "overlap_gray_and_runtime_background": 24627,
+  "gray_not_runtime_background": 73400,
+  "runtime_background_not_gray": 1031193,
+  "overlap_gray_and_calib_background": 0
+}
